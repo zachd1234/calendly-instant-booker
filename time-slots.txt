@@ -1,0 +1,46 @@
+# Additional Calendly Time Slot Formats
+
+## Time Zone Variations (for the same April 9, 2025 4:00 PM slot)
+
+PDT (-07:00):
+https://calendly.com/zachderhake/30min/2025-04-09T16:00:00-07:00
+
+EDT (-04:00):
+https://calendly.com/zachderhake/30min/2025-04-09T19:00:00-04:00
+
+UTC (+00:00):
+https://calendly.com/zachderhake/30min/2025-04-09T23:00:00+00:00
+
+BST (+01:00):
+https://calendly.com/zachderhake/30min/2025-04-10T00:00:00+01:00
+
+## Different Months in 2025
+
+May:
+https://calendly.com/zachderhake/30min/2025-05-15T14:00:00-07:00
+
+June:
+https://calendly.com/zachderhake/30min/2025-06-20T11:30:00-07:00
+
+July:
+https://calendly.com/zachderhake/30min/2025-07-08T09:00:00-07:00
+
+August:
+https://calendly.com/zachderhake/30min/2025-08-12T15:30:00-07:00
+
+September:
+https://calendly.com/zachderhake/30min/2025-09-23T10:30:00-07:00
+
+October:
+https://calendly.com/zachderhake/30min/2025-10-05T13:00:00-07:00
+
+## 2024 Dates (Current Year)
+
+April 2024:
+https://calendly.com/zachderhake/30min/2024-04-25T16:00:00-07:00
+
+May 2024:
+https://calendly.com/zachderhake/30min/2024-05-30T14:30:00-07:00
+
+June 2024:
+https://calendly.com/zachderhake/30min/2024-06-15T09:30:00-07:00 
