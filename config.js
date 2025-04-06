@@ -6,7 +6,6 @@
 require('dotenv').config(); // Load environment variables from .env file
 
 module.exports = {
-  CALENDLY_URLS: require('./calendly-urls'),
   POOL_SIZE: parseInt(process.env.POOL_SIZE || '3', 10), // Default to 3 browsers in the pool
   PROXY_PROVIDER: process.env.PROXY_PROVIDER || 'oxylabs',
   PROXY_URL: process.env.PROXY_URL, // The proxy server URL
