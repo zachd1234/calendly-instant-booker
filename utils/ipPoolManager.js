@@ -8,6 +8,7 @@ const https = require('https');
 const http = require('http');
 const { promisify } = require('util');
 const config = require('../config');
+const { createWarmBrowser, isWarmBrowserAvailable } = require('./warmBrowserManager');
 
 // Pool of pre-warmed IP sessions
 let ipPool = [];
@@ -30,21 +31,32 @@ let stats = {
 // Track the last used session to prevent immediate reuse
 let lastUsedSessionId = null;
 
+// Flag to track if the pool has been initialized
+let isInitialized = false;
+
 // Log configuration at startup
 console.log('IP Pool Manager Configuration:');
 console.log(`Target pool size: ${targetPoolSize}`);
-console.log(`Proxy server: ${config.PROXY_URL}`);
-console.log(`Proxy username base: ${config.PROXY_USERNAME ? config.PROXY_USERNAME.split('_')[0] : 'Not set'}`);
+console.log(`Proxy server: ${config.PROXY_URL || 'None'}`);
+console.log(`Proxy username base: ${config.PROXY_USERNAME || 'None'}`);
 
 /**
- * Generate a unique session ID for Oxylabs
+ * Generate a unique session ID
  * @returns {string} A unique session ID
  */
 function generateSessionId() {
-  // Create a more unique session ID with a timestamp component
   const timestamp = Date.now().toString(36);
   const random = Math.random().toString(36).substring(2, 8);
-  return `${timestamp}-${random}`;
+  return `${timestamp.substring(timestamp.length - 6)}-${random}`;
+}
+
+/**
+ * Set persistence mode
+ * @param {boolean} mode - Whether to run in persistent mode
+ */
+function setPersistentMode(mode) {
+  persistentMode = !!mode;
+  console.log(`IP Pool Manager persistent mode set to: ${persistentMode}`);
 }
 
 /**
@@ -61,7 +73,7 @@ function createProxySession() {
   
   // Only add the session ID if username doesn't already have one
   if (username && !username.includes('_')) {
-    modifiedUsername = `${username}_${sessionId}`;
+    modifiedUsername = `${username}_BfgMH`;
   }
   
   // Format the server URL
@@ -78,7 +90,7 @@ function createProxySession() {
     username: modifiedUsername,
     password: config.PROXY_PASSWORD,
     server: server,
-    isWarmed: true, // Consider all sessions pre-warmed since Playwright handles connections well
+    isWarmed: false,
     lastUsed: null,
     createdAt: Date.now(),
     timesUsed: 0,
@@ -89,8 +101,9 @@ function createProxySession() {
 /**
  * "Warm up" a proxy session
  * 
- * Note: We're not actually making a connection - we're just simulating the warmup
- * because Playwright handles the connections efficiently anyway.
+ * This function now does two things:
+ * 1. Prepares the proxy session for fast DNS resolution and TLS handshakes
+ * 2. Creates a warm browser instance with Calendly page already loaded
  * 
  * @param {Object} session - The proxy session to warm up
  * @returns {Promise<Object>} The warmed-up session
@@ -109,9 +122,21 @@ async function warmupSession(session) {
   
   console.log(`✅ Prepared IP session ${session.sessionId} with proxy ${proxyHost}`);
   console.log(`Username: ${session.username}`);
-    
-  // We're marking all sessions as pre-warmed since Playwright handles connections well
+  
+  // Mark session as warmed for proxy connection
   session.isWarmed = true;
+  
+  // If in persistent mode, also create a warm browser for this session
+  if (persistentMode) {
+    try {
+      // Create a warm browser with Calendly page preloaded
+      await createWarmBrowser(session);
+    } catch (error) {
+      console.log(`Warning: Unable to create warm browser for session ${session.sessionId}: ${error.message}`);
+      // Still consider the session warmed for IP purposes even if browser warming fails
+    }
+  }
+  
   return session;
 }
 
@@ -121,11 +146,25 @@ async function warmupSession(session) {
  * @returns {Promise<void>}
  */
 async function initializePool(force = false) {
-  if (force) {
-    persistentMode = true; // If forced, assume we're in persistent mode
+  // If already initialized, only proceed if force=true  
+  if (isInitialized && !force) {
+    console.log('Pool already initialized, skipping initialization');
+    return ipPool.length;
   }
   
-  if (warmingPromise && !force) {
+  if (force) {
+    persistentMode = true; // If forced, assume we're in persistent mode
+    console.log('Forcing pool initialization in persistent mode');
+    
+    // If force=true and already warming up, wait for current warming to finish
+    if (warmingPromise) {
+      try {
+        await warmingPromise;
+      } catch (e) {
+        // Ignore errors, we'll proceed with a new initialization
+      }
+    }
+  } else if (warmingPromise) {
     return warmingPromise;
   }
   
@@ -135,9 +174,16 @@ async function initializePool(force = false) {
   }
   
   isWarmingUp = true;
+  console.log('Starting pool initialization...');
   
   warmingPromise = (async () => {
     console.log(`Initializing IP pool with target size of ${targetPoolSize}`);
+    
+    if (force) {
+      // If forcing, clear existing pool to avoid duplicate sessions
+      console.log('Clearing existing pool due to force=true');
+      ipPool = [];
+    }
     
     // Create session configurations
     const sessionsToCreate = targetPoolSize - ipPool.length;
@@ -148,7 +194,8 @@ async function initializePool(force = false) {
     if (newSessions.length === 0) {
       console.log('Pool already at target size');
       isWarmingUp = false;
-      return;
+      isInitialized = true;
+      return ipPool.length;
     }
     
     console.log(`Creating ${newSessions.length} new IP sessions`);
@@ -177,20 +224,10 @@ async function initializePool(force = false) {
     console.log(`IP pool initialized with ${ipPool.length} sessions`);
     stats.lastRefreshTime = new Date();
     
-    // Only set up periodic refresh if not in persistent mode
-    // (persistent mode handles this via startIpPool.js)
-    if (!persistentMode) {
-      // Periodically refresh the pool
-      setTimeout(() => {
-        refreshPool().catch(console.error);
-      }, 60000); // Check every minute
-    }
-    
     isWarmingUp = false;
-  })().catch(err => {
-    console.error(`Error initializing IP pool: ${err.message}`);
-    isWarmingUp = false;
-  });
+    isInitialized = true;
+    return ipPool.length;
+  })();
   
   return warmingPromise;
 }
@@ -280,45 +317,70 @@ async function getIpSession() {
     };
   }
   
-  // Avoid reusing the last used session if possible
-  let session = availableSessions.find(s => s.sessionId !== lastUsedSessionId);
+  // IMPROVED WARM BROWSER DETECTION:
+  // Try much harder to find a session with a warm browser
   
-  // If all available sessions are the last used one, just pick any
-  if (!session) {
-    session = availableSessions[0];
+  // Check all available sessions for warm browsers
+  const sessionsWithBrowsers = [];
+  let hasCheckedWarmBrowsers = false;
+  
+  for (const session of availableSessions) {
+    // This is an expensive operation (API call), so only do it if we have a small pool
+    // or if we're running in persistent mode (where warm browsers matter more)
+    if (persistentMode || ipPool.length < 10) {
+      hasCheckedWarmBrowsers = true;
+      try {
+        if (await isWarmBrowserAvailable(session.sessionId)) {
+          // Found a session with a warm browser - use it immediately!
+          console.log(`Found session ${session.sessionId} with warm browser ready`);
+          sessionsWithBrowsers.push(session);
+        }
+      } catch (error) {
+        console.error(`Error checking warm browser for session ${session.sessionId}:`, error.message);
+        // Continue with other sessions
+      }
+    }
+  }
+  
+  // Sort sessions: prioritize ones with warm browsers, then avoid the most recently used ones
+  let sessionToUse;
+  
+  if (sessionsWithBrowsers.length > 0) {
+    console.log(`Found ${sessionsWithBrowsers.length} sessions with warm browsers ready`);
+    // Use the first session with a warm browser
+    sessionToUse = sessionsWithBrowsers[0];
+  } else {
+    if (hasCheckedWarmBrowsers) {
+      console.log('No sessions with warm browsers found, using regular selection');
+    }
+    
+    // Avoid reusing the last used session if possible
+    sessionToUse = availableSessions.find(s => s.sessionId !== lastUsedSessionId);
+    
+    // If all available sessions are the last used one, just pick any
+    if (!sessionToUse) {
+      sessionToUse = availableSessions[0];
+    }
   }
   
   // Mark session as in use and update last used
-  session.inUse = true;
-  session.lastUsed = Date.now();
-  session.timesUsed++;
-  lastUsedSessionId = session.sessionId;
+  sessionToUse.inUse = true;
+  sessionToUse.lastUsed = Date.now();
+  sessionToUse.timesUsed++;
+  lastUsedSessionId = sessionToUse.sessionId;
   
   stats.sessionsUsed++;
   
-  console.log(`Using IP session ${session.sessionId}`);
+  console.log(`Using IP session ${sessionToUse.sessionId}`);
   
-  // Only create a replacement session if in persistent mode and our usage is high
-  // This prevents unnecessary session creation for one-off uses
-  if (persistentMode && session.timesUsed > 5) {
-    setTimeout(() => {
-      console.log(`Session ${session.sessionId} has been used ${session.timesUsed} times, preparing replacement`);
-      const newSession = createProxySession();
-      warmupSession(newSession)
-        .then(warmedSession => {
-          ipPool.push(warmedSession);
-          console.log(`Added replacement session ${warmedSession.sessionId} to pool`);
-        })
-        .catch(console.error);
-    }, 0);
-  }
-  
+  // Return the session with a release function
   return {
-    username: session.username,
-    password: session.password,
-    server: session.server,
-    sessionId: session.sessionId,
-    release: () => releaseSession(session.sessionId)
+    username: sessionToUse.username,
+    password: sessionToUse.password,
+    server: sessionToUse.server,
+    sessionId: sessionToUse.sessionId,
+    // Provide a function to release this session back to the pool
+    release: () => releaseSession(sessionToUse.sessionId)
   };
 }
 
@@ -340,6 +402,7 @@ function releaseSession(sessionId) {
 function cleanupPool() {
   console.log(`Cleaning up IP pool with ${ipPool.length} sessions`);
   ipPool = [];
+  isInitialized = false;
 }
 
 /**
@@ -367,25 +430,66 @@ function getPoolStats() {
 }
 
 /**
- * Set the IP Pool Manager to persistent mode
- * Call this when running as a background service
+ * Get a specific IP session by ID
+ * @param {string} sessionId - The ID of the session to get
+ * @returns {Promise<Object|null>} The session if found, null if not found or in use
  */
-function setPersistentMode(enabled = true) {
-  persistentMode = enabled;
-  console.log(`IP Pool Manager persistent mode set to: ${persistentMode}`);
-  return persistentMode;
+async function getSpecificSession(sessionId) {
+  if (!sessionId) {
+    console.error('No sessionId provided');
+    return null;
+  }
+  
+  // Find the session in the pool
+  const session = ipPool.find(s => s.sessionId === sessionId && !s.inUse);
+  
+  if (!session) {
+    console.log(`Session ${sessionId} not found or already in use`);
+    return null;
+  }
+  
+  // Mark session as in use and update last used
+  session.inUse = true;
+  session.lastUsed = Date.now();
+  session.timesUsed++;
+  lastUsedSessionId = session.sessionId;
+  
+  stats.sessionsUsed++;
+  
+  console.log(`Using specific IP session ${session.sessionId}`);
+  
+  // Return the session with a release function
+  return {
+    username: session.username,
+    password: session.password,
+    server: session.server,
+    sessionId: session.sessionId,
+    // Provide a function to release this session back to the pool
+    release: () => releaseSession(session.sessionId)
+  };
 }
 
-// Start initializing the pool in the background
-// (but don't await, let it happen asynchronously)
-initializePool().catch(console.error);
+/**
+ * Get all sessions from the pool (for tracking purposes)
+ * @returns {Array} Array of all sessions with their IDs
+ */
+function getAllSessions() {
+  return ipPool.map(session => ({
+    sessionId: session.sessionId,
+    inUse: session.inUse,
+    timesUsed: session.timesUsed
+  }));
+}
 
+// Export the module
 module.exports = {
   getIpSession,
+  getSpecificSession,
   releaseSession,
   initializePool,
   refreshPool,
   cleanupPool,
   getPoolStats,
-  setPersistentMode
+  setPersistentMode,
+  getAllSessions
 }; 

@@ -1,32 +1,33 @@
 const { chromium } = require('playwright');
 require('dotenv').config();
-const ipPoolClient = require('./utils/ipPoolClient');
+const { getIpSession, releaseSession, getWarmBrowser, isServerRunning } = require('./utils/ipPoolClient');
 const config = require('./config');
 
 // Configuration - Moving Calendly URL to code instead of .env
 // List of Calendly time slots to cycle through
 const CALENDLY_SLOTS = [
-"https://calendly.com/zachderhake/30min/2025-04-21T10:00:00-07:00", // April 21, 2025 at 10:00 AM PDT
-"https://calendly.com/zachderhake/30min/2025-04-21T14:30:00-07:00", // April 21, 2025 at 2:30 PM PDT
-"https://calendly.com/zachderhake/30min/2025-04-22T09:00:00-07:00", // April 22, 2025 at 9:00 AM PDT
-"https://calendly.com/zachderhake/30min/2025-04-22T13:30:00-07:00", // April 22, 2025 at 1:30 PM PDT
-"https://calendly.com/zachderhake/30min/2025-04-23T11:00:00-07:00", // April 23, 2025 at 11:00 AM PDT
-"https://calendly.com/zachderhake/30min/2025-04-23T15:00:00-07:00", // April 23, 2025 at 3:00 PM PDT
-"https://calendly.com/zachderhake/30min/2025-04-24T09:30:00-07:00", // April 24, 2025 at 9:30 AM PDT
-"https://calendly.com/zachderhake/30min/2025-04-24T14:00:00-07:00", // April 24, 2025 at 2:00 PM PDT
-"https://calendly.com/zachderhake/30min/2025-04-25T08:30:00-07:00", // April 25, 2025 at 8:30 AM PDT
-"https://calendly.com/zachderhake/30min/2025-04-25T12:30:00-07:00"  // April 25, 2025 at 12:30 PM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-22T10:00:00-07:00", // April 22, 2025 at 10:00 AM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-22T14:30:00-07:00", // April 22, 2025 at 2:30 PM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-23T09:30:00-07:00", // April 23, 2025 at 9:30 AM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-23T16:00:00-07:00", // April 23, 2025 at 4:00 PM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-24T11:00:00-07:00", // April 24, 2025 at 11:00 AM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-24T13:30:00-07:00", // April 24, 2025 at 1:30 PM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-25T10:00:00-07:00", // April 25, 2025 at 10:00 AM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-25T15:00:00-07:00", // April 25, 2025 at 3:00 PM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-26T09:00:00-07:00", // April 26, 2025 at 9:00 AM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-26T11:30:00-07:00"  // April 26, 2025 at 11:30 AM PDT
 ];
 
+
 // You can change this index to cycle through different time slots (0-9)
-const SLOT_INDEX = 2; // Change this to try different slots
+const SLOT_INDEX = 6; // Change this to try different slots
 
 // Get current Calendly URL
 const CALENDLY_URL = CALENDLY_SLOTS[SLOT_INDEX];
 
 // Other configuration from .env
-const NAME = process.env.NAME || "Julian Bot";
-const EMAIL = process.env.EMAIL || "julian@example.com";
+const NAME = "Happy Tony";
+const EMAIL = "happytony@gmail.com";
 
 // Phone number without hyphens
 const PHONE_NUMBER = "+1 3109122380";
@@ -123,511 +124,406 @@ async function humanType(page, selector, text) {
   }
 }
 
-async function bookCalendlyAppointment() {
-  console.log('Starting Calendly booking process...');
-  console.log(`Using time slot: ${CALENDLY_URL}`);
-  const startTime = Date.now();
-  
-  // Get random user agent and viewport for added realism
-  const userAgent = getRandomUserAgent();
-  const viewport = getRandomViewport();
-  
-  // OPTIMIZATION #11: Use the IP Pool Manager to get a session with a different IP
-  const session = await ipPoolClient.getIpSession();
-  console.log(`Using IP session ${session.sessionId}`);
-  console.log(`Using proxy: ${session.server}`);
-  console.log(`Using user agent: ${userAgent}`);
-  console.log(`Using viewport: ${viewport.width}x${viewport.height}`);
-  
-  let browser;
+/**
+ * Main booking function using IP Pool and Warm Browser support
+ */
+async function runBooking() {
   try {
-    // Set headless: true so we can't see what's happening for production
-    browser = await chromium.launch({ 
-      headless: true, // OPTIMIZATION #10: Run headless for best performance
-      // Optimization #4: Remove slowMo completely for maximum speed
-      proxy: {
-        server: session.server,
-        username: session.username,
-        password: session.password
-      }
-    });
+    console.log('Starting booking process with IP Pool and Warm Browser support...');
     
-    // Create a new browser context with our randomized settings
-    const context = await browser.newContext({
-      viewport: viewport,
-      userAgent: userAgent,
-      deviceScaleFactor: 1, // Simplified for now
-      locale: 'en-US',
-      // OPTIMIZATION #10: Disable unnecessary browser features to speed up page load
-      javaScriptEnabled: true, // Keep JS enabled as it's required for Calendly
-      hasTouch: false, // Disable touch simulation
-      isMobile: false, // Not simulating mobile
-      serviceWorkers: 'block', // Block service workers to prevent background processes
-      // Block image loading to save bandwidth and speed up page load
-      // Only use if you don't need images for the booking process
-      extraHTTPHeaders: {
-        // Disable image loading and animations to reduce page load time
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Cache-Control': 'no-cache' // Force latest content without cache validation
-      }
-    });
+    // Check if IP Pool Server is running
+    const serverRunning = await isServerRunning();
+    if (!serverRunning) {
+      throw new Error('IP Pool Server is not running! Start it with "node ipPoolServer.js" in a separate terminal.');
+    }
     
-    const page = await context.newPage();
+    console.log('IP Pool Server is running, proceeding...');
     
-    // OPTIMIZATION #10: Set route handlers to abort unnecessary requests
-    await page.route('**/*.{png,jpg,jpeg,gif,svg,webp}', route => route.abort()); // Block images
-    await page.route('**/*.{css}', route => route.continue()); // Let CSS through for layout
-    await page.route('**/*.{woff,woff2,ttf,otf,eot}', route => route.abort()); // Block fonts
-    await page.route('**/*ga*.js', route => route.abort()); // Block Google Analytics
-    await page.route('**/*facebook*.js', route => route.abort()); // Block Facebook tracking
-    await page.route('**/*pixel*.js', route => route.abort()); // Block pixel trackers
+    // Get time for performance metrics
+    const startTime = Date.now();
+    
+    // Get an IP session from the pool
+    console.log('Requesting IP session from pool...');
+    const sessionStartTime = Date.now();
+    
+    const session = await getIpSession();
+    
+    const sessionTime = (Date.now() - sessionStartTime) / 1000;
+    console.log(`Got IP session ${session.sessionId} in ${sessionTime.toFixed(2)}s`);
     
     try {
-      // Navigate to the Calendly page with some timeout tolerance - OPTIMIZATION #1
-      console.log(`Navigating to ${CALENDLY_URL}`);
-      // Use 'domcontentloaded' instead of 'load' for faster page navigation
-      await page.goto(CALENDLY_URL, { 
-        waitUntil: 'domcontentloaded', 
-        timeout: 30000,
-        // OPTIMIZATION #10: Additional page load options
-        referer: 'https://www.google.com/' // Set a referer to appear more natural
-      });
-      // Reduced wait time from 2000ms to 500ms - just enough for basic UI stabilization
-      await page.waitForTimeout(500); 
+      // Get the warm browser for this session if available, or create a new one
+      console.log('Getting browser...');
+      const browserStartTime = Date.now();
       
-      // Debug output of page title
-      console.log('Page title:', await page.title());
+      // Try to get a pre-warmed browser for this session
+      const { browser, page, creationTime } = await getWarmBrowser(session);
       
-      // OPTIMIZATION #2: Faster cookie consent handling
-      console.log('Handling cookie consent...');
+      const browserTime = (Date.now() - browserStartTime) / 1000;
+      console.log(`Got browser in ${browserTime.toFixed(2)}s (creation time: ${creationTime.toFixed(2)}s)`);
+      
+      // Set up page event handling for debugging
+      page.on('console', msg => console.log('Browser console:', msg.text()));
+      page.on('error', err => console.error('Browser error:', err));
+      
       try {
-        // Try immediately accepting via JavaScript (faster than waiting for selector)
-        await page.evaluate(() => {
-          // Common cookie consent buttons and identifiers
-          const selectors = [
-            '#onetrust-accept-btn-handler',
-            '[aria-label="Accept cookies"]',
-            '[aria-label="Accept all cookies"]',
-            'button:has-text("Accept")',
-            'button:has-text("Accept all")'
-          ];
-          
-          // Try each selector
-          for (const selector of selectors) {
-            const button = document.querySelector(selector);
-            if (button) {
-              console.log('Found and clicking cookie button via JS:', selector);
-              button.click();
-              return true;
-            }
-          }
-          return false;
+        // Navigate to the booking page
+        console.log('Navigating to booking page...');
+        const navigationStartTime = Date.now();
+        
+        // Navigate to the target Calendly URL
+        const calendlyUrl = config.CALENDLY_URL || CALENDLY_URL;
+        console.log(`Using Calendly URL: ${calendlyUrl}`);
+        await page.goto(calendlyUrl, { 
+          waitUntil: 'domcontentloaded',
+          timeout: 30000 
         });
         
-        // Fallback to traditional selector only if needed
-        // Using a shorter timeout of 1500ms since we already tried JavaScript approach
-        const cookieButton = await page.waitForSelector('#onetrust-accept-btn-handler', { timeout: 1500 }).catch(() => null);
-        if (cookieButton) {
-          console.log('Found cookie button via selector, clicking...');
-          await cookieButton.click();
-          await page.waitForTimeout(150); // Reduced wait time
-        }
-      } catch (e) {
-        console.log('No cookie popup found or it was already dismissed');
-      }
-      
-      // Take a screenshot after cookie handling - kept for debugging
-      if (DEBUG_MODE) {
-        await page.screenshot({ path: 'after-cookies.png' });
-      }
-      
-      // Using generic attribute-based selectors that are less likely to change
-      console.log('Using robust attribute-based selectors to find form fields...');
-      
-      // OPTIMIZATION #6: Use Promise.race() for faster form field detection
-      console.log('Looking for name field...');
-      
-      // Define specific selectors with shorter timeouts
-      const nameSelectors = [
-        'input[name="full_name"]',
-        'input[name="name"]',
-        'input[id*="name" i]',
-        'input[placeholder*="name" i]',
-        'input[type="text"]'
-      ];
-      
-      // Race the selectors against each other
-      console.log('Racing name selectors with short timeouts...');
-      const nameElement = await Promise.race([
-        ...nameSelectors.map(selector => 
-          page.waitForSelector(selector, { state: 'visible', timeout: 2000 })
-            .then(elem => {
-              console.log(`Quick match found with selector: ${selector}`);
-              return { elem, selector };
-            })
-            .catch(() => null)
-        )
-      ].filter(Boolean))
-      .catch(() => null);
-      
-      // Fallback to the combined selector if needed
-      let nameSelector = 'input[name="full_name"], input[name="name"], input[id*="name" i], input[placeholder*="name" i], input[type="text"]';
-      
-      if (nameElement) {
-        console.log(`Found name field quickly with selector: ${nameElement.selector}`);
-        nameSelector = nameElement.selector;
-        await fastFill(page, nameSelector, NAME);
-      } else {
-        console.log('Quick match failed, falling back to combined selector');
-        await page.waitForSelector(nameSelector, { state: 'visible', timeout: 4000 });
-        console.log('Found name field with fallback selector');
-        await fastFill(page, nameSelector, NAME);
-      }
-      
-      // OPTIMIZATION #6: Same approach for email field
-      console.log('Looking for email field...');
-      
-      const emailSelectors = [
-        'input[name="email"]', 
-        'input[type="email"]',
-        'input[id*="email" i]',
-        'input[placeholder*="email" i]'
-      ];
-      
-      console.log('Racing email selectors with short timeouts...');
-      const emailElement = await Promise.race([
-        ...emailSelectors.map(selector => 
-          page.waitForSelector(selector, { state: 'visible', timeout: 1500 })
-            .then(elem => {
-              console.log(`Quick match found with selector: ${selector}`);
-              return { elem, selector };
-            })
-            .catch(() => null)
-        )
-      ].filter(Boolean))
-      .catch(() => null);
-      
-      let emailSelector = 'input[name="email"], input[type="email"], input[id*="email" i], input[placeholder*="email" i]';
-      
-      if (emailElement) {
-        console.log(`Found email field quickly with selector: ${emailElement.selector}`);
-        emailSelector = emailElement.selector;
-        await fastFill(page, emailSelector, EMAIL);
-      } else {
-        console.log('Quick match failed, falling back to combined selector');
-        await page.waitForSelector(emailSelector, { state: 'visible', timeout: 3000 });
-        console.log('Found email field with fallback selector');
-        await fastFill(page, emailSelector, EMAIL);
-      }
-      
-      // OPTIMIZATION #6: Same approach for phone field
-      console.log('Looking for phone field...');
-      
-      const phoneSelectors = [
-        'input[type="tel"]',
-        'input[name*="phone" i]',
-        'input[id*="phone" i]',
-        'input[placeholder*="phone" i]'
-      ];
-      
-      console.log('Racing phone selectors with short timeouts...');
-      const phoneElement = await Promise.race([
-        ...phoneSelectors.map(selector => 
-          page.waitForSelector(selector, { state: 'visible', timeout: 1000 })
-            .then(elem => {
-              console.log(`Quick match found with selector: ${selector}`);
-              return { elem, selector };
-            })
-            .catch(() => null)
-        )
-      ].filter(Boolean))
-      .catch(() => null);
-      
-      if (phoneElement) {
-        console.log(`Found phone field quickly with selector: ${phoneElement.selector}`);
-        console.log(`Using phone number: ${PHONE_NUMBER}`);
+        const navigationTime = (Date.now() - navigationStartTime) / 1000;
+        console.log(`Navigated to booking page in ${navigationTime.toFixed(2)}s`);
         
-        // Clear and fill the phone field
-        await page.focus(phoneElement.selector);
-        await page.click(phoneElement.selector, { clickCount: 3 }); // Triple click to select all
-        await page.keyboard.press('Backspace'); // Clear field including country code
-        await page.fill(phoneElement.selector, PHONE_NUMBER);
-        console.log('Phone field cleared and filled directly');
-      } else {
-        // Fallback approach
-        const phoneSelector = 'input[type="tel"], input[name*="phone" i], input[id*="phone" i], input[placeholder*="phone" i]';
+        // Fill out the form
+        console.log('Filling out booking form...');
+        const formStartTime = Date.now();
+        
+        // Wait for form fields to appear - these will be available if we're using a direct timeslot URL
+        // Otherwise, we'll need to select a date and time first
         try {
-          console.log('Quick match failed, falling back to combined selector');
-          await page.waitForSelector(phoneSelector, { state: 'visible', timeout: 2000 });
-          console.log('Found phone field with fallback selector');
+          // First try to directly find the form fields
+          const formVisible = await page.waitForSelector('input[name="full_name"]', { 
+            timeout: 5000,
+            visible: true
+          }).then(() => true).catch(() => false);
           
-          console.log(`Using phone number: ${PHONE_NUMBER}`);
-          
-          // Clear and fill the phone field
-          await page.focus(phoneSelector);
-          await page.click(phoneSelector, { clickCount: 3 }); // Triple click to select all
-          await page.keyboard.press('Backspace'); // Clear field including country code
-          await page.fill(phoneSelector, PHONE_NUMBER);
-          console.log('Phone field cleared and filled directly');
-        } catch (e) {
-          console.log('Phone field not found or not required:', e.message);
-        }
-      }
-      
-      // Take a screenshot of filled form
-      if (DEBUG_MODE) {
-        await page.screenshot({ path: 'form-filled.png' });
-      }
-      
-      // Use a more generic and robust approach for the submit button
-      console.log('Looking for submit button...');
-      
-      // OPTIMIZATION #9: Use modern page.getByRole() for robust button detection
-      console.log('Using robust role-based button detection...');
-      
-      let submitButtonFound = false;
-      try {
-        // Try to find the submit button using the best modern approach
-        // This is much more reliable than CSS selectors
-        console.log('Trying page.getByRole("button") with common submit texts...');
-        
-        // Most likely text patterns for submit buttons
-        const submitTexts = [
-          'Schedule', 'Confirm', 'Book', 'Submit', 'Next',
-          'Continue', 'Complete', 'Finish', 'Reserve'
-        ];
-        
-        // First try exact role and type
-        console.log('Looking for button with type="submit"...');
-        const submitButton = await page.locator('button[type="submit"]')
-          .or(page.getByRole('button', { name: 'Schedule Event' })) // Based on what we saw in the last run
-          .or(page.locator('form button:last-child'));
-        
-        // Check if we have more than one button - strict mode would cause issues if not handled
-        const buttonCount = await submitButton.count();
-        if (buttonCount > 1) {
-          console.log(`Found ${buttonCount} potential submit buttons, trying the most likely one...`);
-          // Try to get the specific "Schedule Event" button first based on text content
-          const exactButton = await page.getByText('Schedule Event').first();
-          if (await exactButton.count() > 0) {
-            await exactButton.click({ force: true });
-            submitButtonFound = true;
-            console.log('Clicked "Schedule Event" button');
-          } else {
-            // Otherwise try button with type="submit"
-            const submitTypeButton = await page.locator('button[type="submit"]').first();
-            if (await submitTypeButton.count() > 0) {
-              await submitTypeButton.click({ force: true });
-              submitButtonFound = true;
-              console.log('Clicked first submit-type button');
-            }
-          }
-        } else if (buttonCount === 1) {
-          // Check if button is visible and enabled before clicking
-          const isVisible = await submitButton.isVisible();
-          const isEnabled = await submitButton.isEnabled();
-          
-          console.log(`Found submit button: visible=${isVisible}, enabled=${isEnabled}`);
-          
-          if (isVisible && isEnabled) {
-            console.log('Clicking submit button...');
-            // Scroll into view and click
-            await submitButton.scrollIntoViewIfNeeded();
-            await submitButton.click({ force: true });
-            submitButtonFound = true;
-            console.log('Submit button clicked successfully');
-          } else {
-            console.log('Button found but not clickable');
-          }
-        } else {
-          console.log('No submit button found with role selector, trying exact text matches...');
-          
-          // Try each submit text directly
-          for (const text of submitTexts) {
-            if (submitButtonFound) break;
+          // If form isn't immediately visible, we may need to select a date/time first
+          if (!formVisible) {
+            console.log('Form not immediately visible, checking if we need to select a date/time...');
             
-            console.log(`Looking for button with text "${text}"...`);
-            const textButton = await page.getByText(text, { exact: false }).filter({ hasText: text });
+            // Check if we're on the date selection page
+            const isDateSelection = await page.evaluate(() => {
+              return document.querySelector('.calendar-table, [aria-label*="calendar"]') !== null;
+            });
             
-            if (await textButton.count() > 0) {
-              console.log(`Found button with text "${text}"`);
-              // Check if it's actually a button or button-like element
-              const tag = await textButton.evaluate(el => el.tagName.toLowerCase());
+            if (isDateSelection) {
+              console.log('Date selection page detected. We should use a direct time slot URL instead.');
+              console.log('Available slots:');
+              for (let i = 0; i < CALENDLY_SLOTS.length; i++) {
+                console.log(`  ${i}: ${CALENDLY_SLOTS[i]}`);
+              }
+              console.log(`Current slot index: ${SLOT_INDEX}`);
               
-              if (tag === 'button' || tag === 'input' || 
-                  (tag === 'a' && await textButton.evaluate(el => el.href)) ||
-                  await textButton.evaluate(el => el.getAttribute('role') === 'button')) {
-                
-                // It's a clickable element, so click it
-                console.log('Clicking text-matched button...');
-                await textButton.scrollIntoViewIfNeeded();
-                await textButton.click({ force: true });
-                submitButtonFound = true;
-                console.log('Text-matched button clicked successfully');
-                break;
+              // Let's try again with a direct URL if we're not already using one
+              if (!calendlyUrl.includes('/2025-')) {
+                const directUrl = CALENDLY_SLOTS[SLOT_INDEX];
+                console.log(`Retrying with direct time slot URL: ${directUrl}`);
+                await page.goto(directUrl, { 
+                  waitUntil: 'domcontentloaded',
+                  timeout: 30000 
+                });
+                // Now wait for the form
+                await page.waitForSelector('input[name="full_name"]', { timeout: 15000 });
               } else {
-                console.log(`Element with text "${text}" is not a button (${tag})`);
+                throw new Error('Unable to find form fields even with direct time slot URL');
               }
             }
           }
-        }
-      } catch (e) {
-        console.log(`Error during role-based button search: ${e.message}`);
-      }
+          
+          // Once we're sure the form is visible, fill it out
+          await page.waitForSelector('input[name="full_name"]', { timeout: 15000 });
+          await page.waitForSelector('input[name="email"]', { timeout: 15000 });
+          
+          console.log('Using enhanced form filling strategies...');
+          
+          // Fill out the form with the configured name and email using fastFill
+          await fastFill(page, 'input[name="full_name"]', NAME || 'Test User');
+          await fastFill(page, 'input[name="email"]', EMAIL || 'test@example.com');
+          
+          // Fill out phone if the field exists
+          const phoneFieldExists = await page.$('input[type="tel"]').then(res => !!res).catch(() => false);
+          if (phoneFieldExists && PHONE_NUMBER) {
+            await fastFill(page, 'input[type="tel"]', PHONE_NUMBER);
+          }
+          
+          // Take a screenshot of the filled form before submission
+          await page.screenshot({ path: 'form-filled.png' });
+          console.log('Form filled and screenshot taken, proceeding to submit...');
+          
+          // Enhanced button detection strategy from index.js
+          console.log('Using advanced button detection strategy...');
+    
+    let submitButtonFound = false;
+          
+          // First try exact role and type - more reliable than CSS selectors
+      console.log('Looking for button with type="submit"...');
+          try {
+      const submitButton = await page.locator('button[type="submit"]')
+              .or(page.getByRole('button', { name: 'Schedule Event' }))
+        .or(page.locator('form button:last-child'));
       
-      // If role-based approach failed, try JavaScript submission as a fallback
-      if (!submitButtonFound) {
-        console.log('Role-based button detection failed, trying JavaScript form submission...');
+            // Check if we have more than one button
+      const buttonCount = await submitButton.count();
+            if (buttonCount > 0) {
+        console.log(`Found ${buttonCount} potential submit buttons, trying the most likely one...`);
+              
+        // Try to get the specific "Schedule Event" button first based on text content
+        const exactButton = await page.getByText('Schedule Event').first();
+        if (await exactButton.count() > 0) {
+          await exactButton.click({ force: true });
+          submitButtonFound = true;
+          console.log('Clicked "Schedule Event" button');
+        } else {
+          // Otherwise try button with type="submit"
+          const submitTypeButton = await page.locator('button[type="submit"]').first();
+          if (await submitTypeButton.count() > 0) {
+            await submitTypeButton.click({ force: true });
+            submitButtonFound = true;
+            console.log('Clicked first submit-type button');
+                } else {
+                  // Try the form's last button
+                  const lastButton = await page.locator('form button:last-child').first();
+                  if (await lastButton.count() > 0) {
+                    await lastButton.click({ force: true });
+                    submitButtonFound = true;
+                    console.log('Clicked last button in form');
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            console.log(`Error during role-based button search: ${e.message}`);
+          }
+          
+          // If role-based approach failed, try text-based matching
+          if (!submitButtonFound) {
+            console.log('Role-based button detection failed, trying text-based matching...');
+            
+            // Most likely text patterns for submit buttons
+            const submitTexts = [
+              'Schedule', 'Confirm', 'Book', 'Submit', 'Next',
+              'Continue', 'Complete', 'Finish', 'Reserve'
+            ];
         
-        // JavaScript-based form submission as a last resort
-        const formSubmitScript = `
-          // Try to find the form
-          const forms = document.querySelectorAll('form');
-          if (forms.length > 0) {
-            console.log('Found', forms.length, 'forms on the page');
-            // Find the button in the last form
-            const form = forms[forms.length - 1];
-            const buttons = form.querySelectorAll('button');
-            if (buttons.length > 0) {
-              console.log('Found', buttons.length, 'buttons in the form');
-              const button = buttons[buttons.length - 1];
-              console.log('Clicking last button in form');
-              button.click();
-              return true;
+        // Try each submit text directly
+        for (const text of submitTexts) {
+          if (submitButtonFound) break;
+          
+          console.log(`Looking for button with text "${text}"...`);
+              try {
+          const textButton = await page.getByText(text, { exact: false }).filter({ hasText: text });
+          
+          if (await textButton.count() > 0) {
+            console.log(`Found button with text "${text}"`);
+            // Check if it's actually a button or button-like element
+            const tag = await textButton.evaluate(el => el.tagName.toLowerCase());
+            
+            if (tag === 'button' || tag === 'input' || 
+                (tag === 'a' && await textButton.evaluate(el => el.href)) ||
+                await textButton.evaluate(el => el.getAttribute('role') === 'button')) {
+              
+              // It's a clickable element, so click it
+              console.log('Clicking text-matched button...');
+              await textButton.scrollIntoViewIfNeeded();
+              await textButton.click({ force: true });
+              submitButtonFound = true;
+              console.log('Text-matched button clicked successfully');
+              break;
             } else {
-              // No button found in form, try to submit the form directly
-              console.log('No buttons found, submitting form directly');
-              form.submit();
-              return true;
+              console.log(`Element with text "${text}" is not a button (${tag})`);
             }
           }
-          return false;
-        `;
-        
-        try {
-          const result = await page.evaluate(formSubmitScript);
-          if (result) {
-            console.log('JavaScript form submission approach succeeded');
-            submitButtonFound = true;
-          } else {
-            console.log('JavaScript form submission approach failed');
-          }
-        } catch (e) {
-          console.log('Error with JavaScript form submission:', e.message);
+              } catch (e) {
+                console.log(`Error trying to find/click "${text}" button: ${e.message}`);
         }
       }
+    }
+    
+          // If all other approaches failed, try JavaScript form submission as a fallback
+    if (!submitButtonFound) {
+            console.log('All button detection methods failed, trying JavaScript form submission...');
       
-      if (!submitButtonFound) {
-        console.log('⚠️ Warning: Could not find or click any submit button');
-        if (DEBUG_MODE) {
-          await page.screenshot({ path: 'no-submit-button-found.png' });
-        }
-      } else {
-        console.log('Submit button clicked, waiting for confirmation...');
-      }
-      
-      // Wait for navigation or confirmation
-      console.log('Waiting for confirmation or next page...');
-      try {
-        // OPTIMIZATION #7: Faster confirmation detection with specific CSS selectors
-        // We use a very short timeout for each check and run them in parallel
-        console.log('Using fast CSS detection for confirmation...');
-        
-        const confirmationSelectors = [
-          // Success indicators
-          'div.confirmation-page', 
-          'div.success-message',
-          'div.thank-you-page',
-          'div[class*="success"], div[class*="confirmed"]',
-          'div[class*="thank"], div[class*="confirmation"]',
-          // Text based - for sites without specific classes
-          'h1:has-text("Confirmed")', 
-          'div:has-text("successfully scheduled")',
-          'p:has-text("confirmation")' 
-        ];
-        
-        // Try all selectors with short timeouts in parallel
-        const confirmationPromises = confirmationSelectors.map(selector => 
-          page.waitForSelector(selector, { timeout: 500 })
-            .then(() => {
-              console.log(`Confirmation detected with selector: ${selector}`);
-              return true;
-            })
-            .catch(() => false)
-        );
-        
-        // Also add a navigation promise
-        const navigationPromise = page.waitForNavigation({ timeout: 5000 })
-          .then(() => {
-            console.log('Page navigation detected');
+      // JavaScript-based form submission as a last resort
+            try {
+      const formSubmitScript = `
+        // Try to find the form
+        const forms = document.querySelectorAll('form');
+        if (forms.length > 0) {
+          console.log('Found', forms.length, 'forms on the page');
+          // Find the button in the last form
+          const form = forms[forms.length - 1];
+          const buttons = form.querySelectorAll('button');
+          if (buttons.length > 0) {
+            console.log('Found', buttons.length, 'buttons in the form');
+            const button = buttons[buttons.length - 1];
+            console.log('Clicking last button in form');
+            button.click();
             return true;
-          })
-          .catch(() => false);
-        
-        // Race all promises
-        const results = await Promise.all([...confirmationPromises, navigationPromise]);
-        const confirmed = results.some(result => result === true);
-        
-        if (confirmed) {
-          console.log('Booking confirmation detected quickly');
+          } else {
+            // No button found in form, try to submit the form directly
+            console.log('No buttons found, submitting form directly');
+            form.submit();
+            return true;
+          }
+        }
+        return false;
+      `;
+      
+        const result = await page.evaluate(formSubmitScript);
+        if (result) {
+          console.log('JavaScript form submission approach succeeded');
+          submitButtonFound = true;
         } else {
-          console.log('No immediate confirmation detected, continuing anyway');
+          console.log('JavaScript form submission approach failed');
         }
       } catch (e) {
-        console.log('No clear confirmation detected, but continuing...');
+        console.log('Error with JavaScript form submission:', e.message);
       }
-      
-      // Check for any error messages
-      console.log('Checking for error messages...');
-      const errorMessage = await page.$('div.error, p.error, div[class*="error"], span[class*="error"]');
-      if (errorMessage) {
-        const errorText = await errorMessage.textContent();
-        console.log(`⚠️ Error detected: ${errorText}`);
-        // Always take a screenshot on error, even in production
-        await page.screenshot({ path: 'error-detected.png' });
-      } else {
-        console.log('No visible errors detected');
-      }
-      
-      // Take final screenshot
-      if (DEBUG_MODE) {
-        await page.screenshot({ path: 'final-result.png' });
-      }
-      
-      console.log('Booking process completed!');
-      
-      // Calculate and log performance metrics
-      const endTime = Date.now();
-      const duration = (endTime - startTime) / 1000;
-      console.log(`✅ Booking completed in ${duration.toFixed(2)} seconds`);
-      
-    } catch (error) {
-      console.error('❌ Error during booking process:', error);
-      // Always take a screenshot on error, even in production
-      if (page) {
-        await page.screenshot({ path: 'error-state.png' }).catch(() => {});
-      }
-    } finally {
-      // OPTIMIZATION #8: Remove unnecessary wait time completely
-      // Only wait if in debug mode for visual checking
-      if (DEBUG_MODE && page) {
-        await page.waitForTimeout(2000); // Reduced even in debug mode
-      }
-      
-      // Close everything
-      if (context) await context.close();
     }
-  } catch (error) {
-    console.error('❌ Error setting up browser:', error);
-  } finally {
-    // Close browser if it was created
-    if (browser) await browser.close();
     
-    // Release the IP session back to the pool
-    session.release();
-    console.log(`Released IP session ${session.sessionId} back to pool`);
+    if (!submitButtonFound) {
+      console.log('⚠️ Warning: Could not find or click any submit button');
+        await page.screenshot({ path: 'no-submit-button-found.png' });
+            throw new Error('Could not find or click any submit button');
+    }
+    
+          // Wait for confirmation page or navigation
+    console.log('Waiting for confirmation or next page...');
+    try {
+            // Use a more reliable parallel approach for confirmation detection
+            console.log('Using enhanced confirmation detection...');
+      
+      const confirmationSelectors = [
+        // Success indicators
+        'div.confirmation-page', 
+        'div.success-message',
+        'div.thank-you-page',
+        'div[class*="success"], div[class*="confirmed"]',
+        'div[class*="thank"], div[class*="confirmation"]',
+        // Text based - for sites without specific classes
+        'h1:has-text("Confirmed")', 
+        'div:has-text("successfully scheduled")',
+              'p:has-text("confirmation")',
+              // Generic text patterns that indicate success
+              'text=/confirmed|success|thank you|scheduled|booked/i'
+      ];
+      
+      // Try all selectors with short timeouts in parallel
+      const confirmationPromises = confirmationSelectors.map(selector => 
+              page.waitForSelector(selector, { timeout: 2000 })
+          .then(() => {
+            console.log(`Confirmation detected with selector: ${selector}`);
+            return true;
+          })
+          .catch(() => false)
+      );
+      
+      // Also add a navigation promise
+            const navigationPromise = page.waitForNavigation({ timeout: 10000 })
+        .then(() => {
+          console.log('Page navigation detected');
+          return true;
+        })
+        .catch(() => false);
+      
+            // Race all promises with a master timeout
+            const confirmationTimeout = new Promise(resolve => setTimeout(() => {
+              console.log('Master confirmation timeout reached');
+              resolve(false);
+            }, 15000));
+            
+            const results = await Promise.race([
+              Promise.all([...confirmationPromises, navigationPromise]),
+              confirmationTimeout
+            ]);
+            
+            const confirmed = Array.isArray(results) && results.some(result => result === true);
+      
+      if (confirmed) {
+              console.log('✅ Booking confirmation detected!');
+              // Take a screenshot of the confirmation page
+              await page.screenshot({ path: 'booking-confirmed.png' });
+      } else {
+              console.log('No confirmation indicators detected, but booking may still be successful');
+              // Still take a screenshot to see the current state
+              await page.screenshot({ path: 'post-submission.png' });
+    }
+    
+    // Check for any error messages
+    console.log('Checking for error messages...');
+    const errorMessage = await page.$('div.error, p.error, div[class*="error"], span[class*="error"]');
+    if (errorMessage) {
+      const errorText = await errorMessage.textContent();
+      console.log(`⚠️ Error detected: ${errorText}`);
+      await page.screenshot({ path: 'error-detected.png' });
+              throw new Error(`Form submission error: ${errorText}`);
+            }
+            
+          } catch (e) {
+            if (e.message.includes('Form submission error')) {
+              throw e; // Re-throw form submission errors
+            }
+            console.log('Confirmation detection timeout, continuing anyway:', e.message);
+            // Take a screenshot of the current state
+            await page.screenshot({ path: 'confirmation-timeout.png' });
+          }
+          
+        } catch (error) {
+          console.error('Error during form filling:', error.message);
+          
+          // Take a screenshot to help diagnose issues
+          await page.screenshot({ path: 'form-error.png' });
+          throw error;
+        }
+        
+        const formTime = (Date.now() - formStartTime) / 1000;
+        console.log(`Filled out form in ${formTime.toFixed(2)}s`);
+    
+    // Calculate and log performance metrics
+        const totalTime = (Date.now() - startTime) / 1000;
+        console.log('\nPerformance summary:');
+        console.log(`IP session time: ${sessionTime.toFixed(2)}s`);
+        console.log(`Browser time: ${browserTime.toFixed(2)}s`);
+        console.log(`Navigation time: ${navigationTime.toFixed(2)}s`);
+        console.log(`Form fill time: ${formTime.toFixed(2)}s`);
+        console.log(`Total booking time: ${totalTime.toFixed(2)}s`);
+        
+        console.log('\nBooking process completed successfully!');
+        console.log('📅 Appointment has been scheduled.');
+        console.log('See booking-confirmed.png for the confirmation screenshot');
+    
+  } catch (error) {
+        console.error('Error during booking process:', error.message);
+        
+        // Take a screenshot to capture the error state
+        try {
+          await page.screenshot({ path: 'error-state.png' });
+          console.log('Error state screenshot saved as error-state.png');
+        } catch (e) {
+          console.error('Failed to take error screenshot:', e.message);
+        }
+      } finally {
+        // Close the browser
+        try {
+          await browser.close();
+          console.log('Browser closed');
+        } catch (e) {
+          console.error('Error closing browser:', e.message);
+        }
+      }
+  } finally {
+      // Always release the session back to the pool
+      try {
+        await releaseSession(session.sessionId);
+        console.log(`Released IP session ${session.sessionId} back to pool`);
+      } catch (e) {
+        console.error('Error releasing session:', e.message);
+      }
+    }
+    
+  } catch (error) {
+    console.error('Fatal error:', error);
+    process.exit(1);
   }
 }
 
-// Run the script
-bookCalendlyAppointment().catch(console.error);
+// Run the booking process
+runBooking().catch(console.error);

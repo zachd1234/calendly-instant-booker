@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calendly Auto Booker</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f7fa;
+            color: #333;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #2c3e50;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        input[type="text"],
+        input[type="email"],
+        input[type="tel"],
+        input[type="url"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        .results {
+            margin-top: 30px;
+            padding: 20px;
+            border-radius: 4px;
+            background-color: #f8f9fa;
+            border-left: 4px solid #3498db;
+        }
+        .results h2 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .metric {
+            padding: 15px;
+            border-radius: 4px;
+            background-color: #e8f4fc;
+            text-align: center;
+        }
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2980b9;
+            margin: 5px 0;
+        }
+        .metric-label {
+            font-size: 14px;
+            color: #7f8c8d;
+        }
+        .logs {
+            max-height: 300px;
+            overflow-y: auto;
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-radius: 50%;
+            border-left-color: #3498db;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .error {
+            background-color: #fdedee;
+            color: #e74c3c;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            border-left: 4px solid #e74c3c;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Calendly Auto Booker</h1>
+        
+        <div id="error" class="error" style="display: none;"></div>
+        
+        <form id="booking-form">
+            <div class="form-group">
+                <label for="calendly-url">Calendly URL:</label>
+                <input type="url" id="calendly-url" name="calendlyUrl" required 
+                       placeholder="https://calendly.com/username/30min/2023-04-21T10:00:00-07:00">
+            </div>
+            
+            <div class="form-group">
+                <label for="name">Name:</label>
+                <input type="text" id="name" name="name" required placeholder="John Doe">
+            </div>
+            
+            <div class="form-group">
+                <label for="email">Email:</label>
+                <input type="email" id="email" name="email" required placeholder="john@example.com">
+            </div>
+            
+            <div class="form-group">
+                <label for="phone">Phone Number:</label>
+                <input type="tel" id="phone" name="phone" required placeholder="+1 3109122380">
+            </div>
+            
+            <button type="submit" id="submit-btn">Book Appointment</button>
+        </form>
+        
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Booking your appointment... This may take a minute.</p>
+        </div>
+        
+        <div class="results" id="results" style="display: none;">
+            <h2>Booking Results</h2>
+            
+            <div class="metrics" id="metrics">
+                <!-- Metrics will be inserted here -->
+            </div>
+            
+            <h3>Booking Logs:</h3>
+            <div class="logs" id="logs">
+                <!-- Logs will be inserted here -->
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('booking-form');
+            const submitBtn = document.getElementById('submit-btn');
+            const loading = document.getElementById('loading');
+            const results = document.getElementById('results');
+            const metrics = document.getElementById('metrics');
+            const logs = document.getElementById('logs');
+            const error = document.getElementById('error');
+            
+            form.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                
+                // Clear previous results
+                error.style.display = 'none';
+                error.textContent = '';
+                results.style.display = 'none';
+                metrics.innerHTML = '';
+                logs.innerHTML = '';
+                
+                // Disable submit button and show loading
+                submitBtn.disabled = true;
+                loading.style.display = 'block';
+                
+                // Get form data
+                const formData = {
+                    calendlyUrl: document.getElementById('calendly-url').value.trim(),
+                    name: document.getElementById('name').value.trim(),
+                    email: document.getElementById('email').value.trim(),
+                    phone: document.getElementById('phone').value.trim()
+                };
+                
+                try {
+                    // Make API request
+                    const response = await fetch('/api/book', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(formData)
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (response.ok) {
+                        // Display metrics
+                        metrics.innerHTML = `
+                            <div class="metric">
+                                <div class="metric-label">Total Time</div>
+                                <div class="metric-value">${data.duration}s</div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-label">Browser Setup</div>
+                                <div class="metric-value">${data.browserTime}s</div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-label">Navigation</div>
+                                <div class="metric-value">${data.navigationTime}s</div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-label">Form Filling</div>
+                                <div class="metric-value">${data.formTime}s</div>
+                            </div>
+                        `;
+                        
+                        // Display logs
+                        if (data.logs && data.logs.length) {
+                            logs.innerHTML = data.logs.map(log => `<div>${log}</div>`).join('');
+                        } else {
+                            logs.innerHTML = '<div>No logs available</div>';
+                        }
+                        
+                        // Show results
+                        results.style.display = 'block';
+                    } else {
+                        // Show error
+                        error.textContent = data.message || 'An error occurred while booking the appointment.';
+                        error.style.display = 'block';
+                        
+                        // Display error logs if available
+                        if (data.logs && data.logs.length) {
+                            logs.innerHTML = data.logs.map(log => `<div>${log}</div>`).join('');
+                            results.style.display = 'block';
+                        }
+                    }
+                } catch (err) {
+                    console.error('Error:', err);
+                    error.textContent = 'Failed to connect to the server. Please try again.';
+                    error.style.display = 'block';
+                } finally {
+                    // Hide loading and re-enable submit button
+                    loading.style.display = 'none';
+                    submitBtn.disabled = false;
+                }
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,206 +1,404 @@
 /**
- * IP Pool Manager API Server
+ * IP Pool API Server
  * 
- * This script creates a simple HTTP API for the IP Pool Manager,
- * allowing other processes to get and release IP sessions.
+ * Provides an HTTP API for accessing the IP Pool Manager
+ * and maintaining warm browsers for fast booking
  */
 
+const express = require('express');
 const http = require('http');
-const url = require('url');
-const { 
-  getIpSession, 
-  releaseSession, 
-  initializePool, 
-  refreshPool,
-  getPoolStats,
-  setPersistentMode 
-} = require('./utils/ipPoolManager');
+const ipPoolManager = require('./utils/ipPoolManager');
+const { initializeWarmBrowsersForSessions, getWarmBrowser, isWarmBrowserAvailable, getWarmBrowserStats, getWarmBrowserBySessionId } = require('./utils/warmBrowserManager');
+const config = require('./config');
 
-// Default port for the API server
-const PORT = process.env.IP_POOL_PORT || 3057;
+// Track if pool has been initialized
+let poolInitialized = false;
+let initializationPromise = null;
 
-// Set persistent mode
-setPersistentMode(true);
+// Set up Express app
+const app = express();
+app.use(express.json());
 
-// Active sessions tracking (to prevent memory leaks)
-const activeSessions = new Map();
+// Configure and initialize the IP Pool Manager
+const targetPoolSize = config.POOL_SIZE || 5;
+ipPoolManager.setPersistentMode(true);
 
-// Initialize the pool at startup with force=true
-console.log('Initializing IP Pool Manager API Server...');
-initializePool(true).then(() => {
-  console.log('IP Pool initialized successfully');
-}).catch(err => {
-  console.error('Error initializing IP pool:', err);
-});
+// Create an array to store and track sessions
+const trackedSessions = [];
 
-// Simple HTTP API server
-const server = http.createServer(async (req, res) => {
-  const parsedUrl = url.parse(req.url, true);
-  const path = parsedUrl.pathname;
+// Track sessions with warm browsers
+let sessionsWithWarmBrowsers = [];
+
+// Interceptor for ipPoolManager to track all created sessions
+const originalInitializePool = ipPoolManager.initializePool;
+ipPoolManager.initializePool = async function(...args) {
+  // Get existing session count
+  const existingCount = await ipPoolManager.getPoolStats().total || 0;
   
-  // Set CORS headers to allow access from any origin
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  // Call original method
+  const result = await originalInitializePool.apply(this, args);
   
-  // Handle preflight requests
-  if (req.method === 'OPTIONS') {
-    res.statusCode = 204;
-    res.end();
+  // After initialization, get all sessions and track them
+  const afterCount = await ipPoolManager.getPoolStats().total || 0;
+  
+  if (afterCount > existingCount) {
+    console.log(`Need to track ${afterCount - existingCount} new sessions from pool initialization`);
+    await updateTrackedSessions();
+  }
+  
+  return result;
+};
+
+// Helper to update our tracking of all sessions in the pool
+async function updateTrackedSessions() {
+  // Get all sessions from the pool
+  const stats = await ipPoolManager.getPoolStats();
+  const allSessions = await ipPoolManager.getAllSessions();
+  
+  if (!allSessions || allSessions.length === 0) {
+    console.log('No sessions available to track');
     return;
   }
   
-  // Basic logging
-  console.log(`${new Date().toISOString()} - ${req.method} ${path}`);
+  console.log(`Tracking ${allSessions.length} sessions from the pool`);
   
-  if (path === '/api/health') {
-    // Health check endpoint
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ status: 'ok', timestamp: new Date().toISOString() }));
-  } 
-  else if (path === '/api/stats') {
-    // Pool stats endpoint
-    res.setHeader('Content-Type', 'application/json');
-    const stats = getPoolStats();
-    res.end(JSON.stringify(stats));
-  }
-  else if (path === '/api/get-session') {
-    try {
-      // Get a session from the pool
-      const session = await getIpSession();
-      
-      // Generate a unique token for this session
-      const token = `${session.sessionId}-${Date.now()}`;
-      
-      // Store the session in our activeSessions map with its token
-      activeSessions.set(token, session);
-      
-      // Return the token and proxy details
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({
-        token,
-        proxy: {
-          server: session.server,
-          username: session.username,
-          password: session.password
-        },
-        sessionId: session.sessionId
-      }));
-    } catch (error) {
-      console.error('Error getting session:', error);
-      res.statusCode = 500;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ error: 'Failed to get IP session' }));
+  // Clear tracked sessions and add all current ones
+  trackedSessions.length = 0;
+  trackedSessions.push(...allSessions);
+  
+  // Update our knowledge of which sessions have warm browsers
+  await updateWarmBrowserSessions();
+}
+
+// Update our tracking of which sessions have warm browsers
+async function updateWarmBrowserSessions() {
+  sessionsWithWarmBrowsers = [];
+  
+  for (const session of trackedSessions) {
+    const hasWarm = await isWarmBrowserAvailable(session.sessionId);
+    if (hasWarm) {
+      sessionsWithWarmBrowsers.push(session.sessionId);
     }
   }
-  else if (path === '/api/release-session') {
-    if (req.method !== 'POST') {
-      res.statusCode = 405;
-      res.end('Method Not Allowed');
-      return;
+  
+  console.log(`Found ${sessionsWithWarmBrowsers.length} sessions with warm browsers: ${sessionsWithWarmBrowsers.join(', ')}`);
+}
+
+// Helper to create and track sessions
+async function createAndTrackSessions(count) {
+  console.log(`Creating ${count} sessions for warm browser initialization`);
+  const newSessions = [];
+  
+  for (let i = 0; i < count; i++) {
+    // Get a session from the pool
+    const session = await ipPoolManager.getIpSession();
+    console.log(`Created session ${session.sessionId} for warm browser initialization`);
+    
+    // Add to our tracked sessions array
+    newSessions.push(session);
+    
+    // Make sure it's in our tracking array
+    if (!trackedSessions.find(s => s.sessionId === session.sessionId)) {
+      trackedSessions.push(session);
     }
     
-    // Handle POST data
-    let body = '';
-    req.on('data', chunk => {
-      body += chunk.toString();
-    });
+    // Release it back to the pool immediately (but keep track of its details)
+    await ipPoolManager.releaseSession(session.sessionId);
+  }
+  
+  return newSessions;
+}
+
+// Start initializing the pool asynchronously
+initializationPromise = (async () => {
+  try {
+    const poolSize = await ipPoolManager.initializePool();
+    console.log(`✅ Pool initialization complete with ${poolSize} sessions`);
     
-    req.on('end', () => {
+    // Get all sessions and update our tracking
+    await updateTrackedSessions();
+    
+    // Get all IP sessions to initialize warm browsers
+    const poolStats = ipPoolManager.getPoolStats();
+    const sessionCount = Math.min(poolStats.total, 3); // Limit to 3 for faster startup
+    console.log(`Starting warm browser initialization for ${sessionCount} sessions`);
+    
+    // Create and track sessions for warm browser initialization
+    const sessionsForBrowsers = await createAndTrackSessions(sessionCount);
+    
+    // Initialize warm browsers for these sessions
+    if (sessionsForBrowsers.length > 0) {
+      await initializeWarmBrowsersForSessions(sessionsForBrowsers);
+      
+      // Update our knowledge of which sessions have warm browsers
+      await updateWarmBrowserSessions();
+    } else {
+      console.log('No sessions available for warm browser initialization');
+    }
+    
+    poolInitialized = true;
+    return poolSize;
+  } catch (error) {
+    console.error('❌ Failed to initialize pool:', error);
+    throw error;
+  }
+})();
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    poolInitialized,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Get an IP session from the pool
+app.get('/api/get-session', async (req, res) => {
+  try {
+    // Wait for pool initialization if not complete
+    if (!poolInitialized) {
+      console.log('Pool not initialized yet, waiting...');
       try {
-        const data = JSON.parse(body);
-        const { token } = data;
-        
-        if (!token) {
-          res.statusCode = 400;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ error: 'Missing token parameter' }));
-          return;
-        }
-        
-        // Get session from our activeSessions map
-        const session = activeSessions.get(token);
-        
-        if (!session) {
-          res.statusCode = 404;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ error: 'Session not found or already released' }));
-          return;
-        }
-        
-        // Release the session back to the pool
-        releaseSession(session.sessionId);
-        
-        // Remove from our activeSessions map
-        activeSessions.delete(token);
-        
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ success: true, message: 'Session released successfully' }));
+        await initializationPromise;
       } catch (error) {
-        console.error('Error releasing session:', error);
-        res.statusCode = 400;
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ error: 'Invalid request format' }));
+        console.error('Error waiting for pool initialization:', error);
+        return res.status(500).json({
+          error: 'Pool initialization failed',
+          message: error.message
+        });
       }
+    }
+    
+    // Make sure our session tracking is up to date
+    await updateWarmBrowserSessions();
+    
+    console.log(`Found ${sessionsWithWarmBrowsers.length} sessions with warm browsers available: ${sessionsWithWarmBrowsers.join(', ')}`);
+    
+    // Try to get a session with a warm browser first
+    let session = null;
+    
+    if (sessionsWithWarmBrowsers.length > 0) {
+      // Try each warm session in order
+      for (const warmSessionId of sessionsWithWarmBrowsers) {
+        session = await ipPoolManager.getSpecificSession(warmSessionId);
+        if (session) {
+          console.log(`Got specific session ${warmSessionId} with warm browser`);
+          break;
+        }
+      }
+    }
+    
+    // If no warm session was available, get any session
+    if (!session) {
+      console.log('No sessions with warm browsers found or available, using random session');
+      session = await ipPoolManager.getIpSession();
+    }
+    
+    console.log(`IP session ${session.sessionId} returned to client`);
+    
+    // Check if we have a warm browser for this session
+    const hasWarmBrowser = await isWarmBrowserAvailable(session.sessionId);
+    console.log(`Session ${session.sessionId} warm browser available: ${hasWarmBrowser}`);
+    
+    // Return session info with warm browser status
+    res.json({
+      server: session.server,
+      username: session.username,
+      password: session.password,
+      sessionId: session.sessionId,
+      warmBrowserAvailable: hasWarmBrowser
+    });
+  } catch (error) {
+    console.error('Error getting IP session:', error);
+    res.status(500).json({
+      error: 'Failed to get session',
+      message: error.message
     });
   }
-  else if (path === '/api/refresh') {
-    try {
-      // Refresh the pool
-      await refreshPool();
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ success: true, message: 'Pool refreshed successfully' }));
-    } catch (error) {
-      console.error('Error refreshing pool:', error);
-      res.statusCode = 500;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ error: 'Failed to refresh pool' }));
-    }
+});
+
+// Release an IP session back to the pool
+app.post('/api/release-session', (req, res) => {
+  const { sessionId } = req.body;
+  
+  if (!sessionId) {
+    return res.status(400).json({
+      error: 'Missing sessionId'
+    });
   }
-  else {
-    // Not found
-    res.statusCode = 404;
-    res.end('Not Found');
+  
+  try {
+    ipPoolManager.releaseSession(sessionId);
+    res.json({
+      status: 'success',
+      message: `Released session ${sessionId}`
+    });
+  } catch (error) {
+    console.error('Error releasing session:', error);
+    res.status(500).json({
+      error: 'Failed to release session',
+      message: error.message
+    });
+  }
+});
+
+// Get pool statistics
+app.get('/api/stats', (req, res) => {
+  try {
+    const stats = ipPoolManager.getPoolStats();
+    res.json(stats);
+  } catch (error) {
+    console.error('Error getting pool stats:', error);
+    res.status(500).json({
+      error: 'Failed to get pool stats',
+      message: error.message
+    });
+  }
+});
+
+// Get warm browser statistics
+app.get('/api/browser-stats', (req, res) => {
+  try {
+    const stats = getWarmBrowserStats();
+    res.json(stats);
+  } catch (error) {
+    console.error('Error getting browser stats:', error);
+    res.status(500).json({
+      error: 'Failed to get browser stats',
+      message: error.message
+    });
+  }
+});
+
+// Check if a warm browser is available for a session
+app.get('/api/get-warm-browser', async (req, res) => {
+  const { sessionId } = req.query;
+  
+  if (!sessionId) {
+    return res.status(400).json({
+      error: 'Missing sessionId parameter'
+    });
+  }
+  
+  try {
+    // Wait for pool initialization if not complete
+    if (!poolInitialized) {
+      console.log('Pool not initialized yet, waiting before checking warm browser...');
+      try {
+        await initializationPromise;
+      } catch (error) {
+        console.error('Error waiting for pool initialization:', error);
+      }
+    }
+    
+    // Check for warm browser
+    const isAvailable = await isWarmBrowserAvailable(sessionId);
+    console.log(`Checked warm browser for session ${sessionId}: available=${isAvailable}`);
+    
+    // Get additional details if available
+    let browserInfo = null;
+    if (isAvailable) {
+      browserInfo = await getWarmBrowserBySessionId(sessionId);
+    }
+    
+    // Return enhanced browser information
+    res.json({
+      sessionId,
+      warmBrowserAvailable: isAvailable,
+      status: browserInfo ? browserInfo.status : 'not_available',
+      createdAt: browserInfo ? browserInfo.createdAt : null,
+      lastUsed: browserInfo ? browserInfo.lastUsed : null,
+      url: browserInfo ? browserInfo.url : null,
+      warmupTime: browserInfo ? browserInfo.warmupTime : null
+    });
+  } catch (error) {
+    console.error(`Error checking warm browser for session ${sessionId}:`, error);
+    res.status(500).json({
+      error: 'Failed to check warm browser',
+      message: error.message
+    });
+  }
+});
+
+// Get a specific session by ID
+app.get('/api/get-specific-session', async (req, res) => {
+  const { sessionId } = req.query;
+  
+  if (!sessionId) {
+    return res.status(400).json({
+      error: 'Missing sessionId parameter'
+    });
+  }
+  
+  try {
+    // Wait for pool initialization if not complete
+    if (!poolInitialized) {
+      console.log('Pool not initialized yet, waiting...');
+      try {
+        await initializationPromise;
+      } catch (error) {
+        console.error('Error waiting for pool initialization:', error);
+        return res.status(500).json({
+          error: 'Pool initialization failed',
+          message: error.message
+        });
+      }
+    }
+    
+    // Get the specific session
+    const session = await ipPoolManager.getSpecificSession(sessionId);
+    
+    if (!session) {
+      return res.status(404).json({
+        error: 'Session not found or in use',
+        message: `No available session found with ID ${sessionId}`
+      });
+    }
+    
+    console.log(`Specific IP session ${session.sessionId} returned to client`);
+    
+    // Check if we have a warm browser for this session
+    const hasWarmBrowser = await isWarmBrowserAvailable(session.sessionId);
+    console.log(`Session ${session.sessionId} warm browser available: ${hasWarmBrowser}`);
+    
+    // Return session info with warm browser status
+    res.json({
+      server: session.server,
+      username: session.username,
+      password: session.password,
+      sessionId: session.sessionId,
+      warmBrowserAvailable: hasWarmBrowser
+    });
+  } catch (error) {
+    console.error('Error getting specific IP session:', error);
+    res.status(500).json({
+      error: 'Failed to get specific session',
+      message: error.message
+    });
   }
 });
 
 // Start the server
-server.listen(PORT, () => {
-  console.log(`IP Pool Manager API Server running on port ${PORT}`);
-  console.log(`API Endpoints:`);
-  console.log(`  - GET  /api/health        - Check server health`);
-  console.log(`  - GET  /api/stats         - Get pool statistics`);
-  console.log(`  - GET  /api/get-session   - Get an IP session`);
-  console.log(`  - POST /api/release-session - Release a session`);
-  console.log(`  - GET  /api/refresh       - Trigger pool refresh`);
-  console.log('\nKeep this terminal window open to maintain the IP pool!');
-  console.log('Run your booking scripts in a separate terminal window.');
+const port = process.env.PORT || 3057;
+const server = app.listen(port, () => {
+  console.log(`IP Pool API Server running on port ${port}`);
 });
 
-// Set up periodic pool refresh
-const refreshInterval = 30000; // 30 seconds
-setInterval(async () => {
-  try {
-    console.log('Performing scheduled pool refresh...');
-    await refreshPool();
-    console.log('Pool refreshed successfully');
-    
-    // Log stats every few refreshes
-    const stats = getPoolStats();
-    console.log(`\nCurrent Pool Stats:`);
-    console.log(`Total sessions: ${stats.total}`);
-    console.log(`Available: ${stats.available}`);
-    console.log(`In use: ${stats.inUse}`);
-  } catch (error) {
-    console.error('Error during scheduled pool refresh:', error);
-  }
-}, refreshInterval);
+// Handle shutdown gracefully
+process.on('SIGINT', async () => {
+  console.log('Shutting down IP Pool API Server...');
+  
+  // Close the server first
+  server.close();
+  
+  // Then clean up resources
+  await require('./utils/warmBrowserManager').cleanupAllBrowsers();
+  ipPoolManager.cleanupPool();
+  
+  console.log('Shutdown complete');
+  process.exit(0);
+});
 
-// Cleanup on process exit
-process.on('SIGINT', () => {
-  console.log('\nShutting down IP Pool Manager API Server...');
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
-  });
-}); 
+// Export for testing
+module.exports = server;

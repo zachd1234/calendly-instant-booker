@@ -4,20 +4,21 @@ require('dotenv').config();
 // Configuration - Moving Calendly URL to code instead of .env
 // List of Calendly time slots to cycle through
 const CALENDLY_SLOTS = [
-"https://calendly.com/zachderhake/30min/2025-04-21T10:00:00-07:00", // April 21, 2025 at 10:00 AM PDT
-"https://calendly.com/zachderhake/30min/2025-04-21T14:30:00-07:00", // April 21, 2025 at 2:30 PM PDT
-"https://calendly.com/zachderhake/30min/2025-04-22T09:00:00-07:00", // April 22, 2025 at 9:00 AM PDT
-"https://calendly.com/zachderhake/30min/2025-04-22T13:30:00-07:00", // April 22, 2025 at 1:30 PM PDT
-"https://calendly.com/zachderhake/30min/2025-04-23T11:00:00-07:00", // April 23, 2025 at 11:00 AM PDT
-"https://calendly.com/zachderhake/30min/2025-04-23T15:00:00-07:00", // April 23, 2025 at 3:00 PM PDT
-"https://calendly.com/zachderhake/30min/2025-04-24T09:30:00-07:00", // April 24, 2025 at 9:30 AM PDT
-"https://calendly.com/zachderhake/30min/2025-04-24T14:00:00-07:00", // April 24, 2025 at 2:00 PM PDT
-"https://calendly.com/zachderhake/30min/2025-04-25T08:30:00-07:00", // April 25, 2025 at 8:30 AM PDT
-"https://calendly.com/zachderhake/30min/2025-04-25T12:30:00-07:00"  // April 25, 2025 at 12:30 PM PDT
-];
-
+  "https://calendly.com/zachderhake/30min/2025-04-21T10:00:00-07:00", // April 21, 2025 at 10:00 AM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-21T14:30:00-07:00", // April 21, 2025 at 2:30 PM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-22T09:00:00-07:00", // April 22, 2025 at 9:00 AM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-22T13:30:00-07:00", // April 22, 2025 at 1:30 PM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-23T11:00:00-07:00", // April 23, 2025 at 11:00 AM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-23T15:00:00-07:00", // April 23, 2025 at 3:00 PM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-24T09:30:00-07:00", // April 24, 2025 at 9:30 AM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-24T14:00:00-07:00", // April 24, 2025 at 2:00 PM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-25T08:30:00-07:00", // April 25, 2025 at 8:30 AM PDT
+  "https://calendly.com/zachderhake/30min/2025-04-25T12:30:00-07:00"  // April 25, 2025 at 12:30 PM PDT
+  ];
+  
+  
 // You can change this index to cycle through different time slots (0-9)
-const SLOT_INDEX = 0; // Change this to try different slots
+const SLOT_INDEX = 4; // Change this to try different slots
 
 // Get current Calendly URL
 const CALENDLY_URL = CALENDLY_SLOTS[SLOT_INDEX];
@@ -138,6 +139,9 @@ async function bookCalendlyAppointment() {
   console.log(`Using user agent: ${userAgent}`);
   console.log(`Using viewport: ${viewport.width}x${viewport.height}`);
   
+  // PERFORMANCE LOGGING: Track browser creation time
+  const browserStartTime = Date.now();
+  
   // Set headless: false so we can see what's happening when debugging
   const browser = await chromium.launch({ 
     headless: true, // OPTIMIZATION #10: Run headless for best performance
@@ -172,6 +176,10 @@ async function bookCalendlyAppointment() {
   
   const page = await context.newPage();
   
+  // PERFORMANCE LOGGING: Log browser creation time
+  const browserTime = (Date.now() - browserStartTime) / 1000;
+  console.log(`Browser created in ${browserTime.toFixed(2)}s`);
+  
   // OPTIMIZATION #10: Set route handlers to abort unnecessary requests
   await page.route('**/*.{png,jpg,jpeg,gif,svg,webp}', route => route.abort()); // Block images
   await page.route('**/*.{css}', route => route.continue()); // Let CSS through for layout
@@ -181,6 +189,9 @@ async function bookCalendlyAppointment() {
   await page.route('**/*pixel*.js', route => route.abort()); // Block pixel trackers
   
   try {
+    // PERFORMANCE LOGGING: Track navigation time
+    const navigationStartTime = Date.now();
+    
     // Navigate to the Calendly page with some timeout tolerance - OPTIMIZATION #1
     console.log(`Navigating to ${CALENDLY_URL}`);
     // Use 'domcontentloaded' instead of 'load' for faster page navigation
@@ -190,11 +201,19 @@ async function bookCalendlyAppointment() {
       // OPTIMIZATION #10: Additional page load options
       referer: 'https://www.google.com/' // Set a referer to appear more natural
     });
+    
+    // PERFORMANCE LOGGING: Log navigation time
+    const navigationTime = (Date.now() - navigationStartTime) / 1000;
+    console.log(`Navigated to booking page in ${navigationTime.toFixed(2)}s`);
+    
     // Reduced wait time from 2000ms to 500ms - just enough for basic UI stabilization
     await page.waitForTimeout(500); 
     
     // Debug output of page title
     console.log('Page title:', await page.title());
+    
+    // PERFORMANCE LOGGING: Track form filling time
+    const formStartTime = Date.now();
     
     // OPTIMIZATION #2: Faster cookie consent handling
     console.log('Handling cookie consent...');
@@ -587,6 +606,10 @@ async function bookCalendlyAppointment() {
       console.log('No visible errors detected');
     }
     
+    // PERFORMANCE LOGGING: Log form filling time
+    const formTime = (Date.now() - formStartTime) / 1000;
+    console.log(`Form filling completed in ${formTime.toFixed(2)}s`);
+    
     // Take final screenshot
     if (DEBUG_MODE) {
       await page.screenshot({ path: 'final-result.png' });
@@ -597,6 +620,12 @@ async function bookCalendlyAppointment() {
     // Calculate and log performance metrics
     const endTime = Date.now();
     const duration = (endTime - startTime) / 1000;
+    
+    // PERFORMANCE LOGGING: Log detailed performance breakdown
+    console.log(`\nPerformance summary:`);
+    console.log(`Browser time: ${browserTime.toFixed(2)}s`);
+    console.log(`Navigation time: ${navigationTime.toFixed(2)}s`);
+    console.log(`Form fill time: ${formTime.toFixed(2)}s`);
     console.log(`✅ Booking completed in ${duration.toFixed(2)} seconds`);
     
   } catch (error) {
