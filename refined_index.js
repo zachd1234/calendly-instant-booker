@@ -659,6 +659,7 @@ async function bookCalendlyAppointment() {
  * @param {string} options.email - The email to use for booking
  * @param {string} options.phone - The phone number to use for booking
  * @param {Function} options.logCapture - Optional function to capture logs
+ * @param {Object} options.browserOptions - Optional browser launch options
  * @returns {Promise<Object>} - Results containing timing information
  */
 async function bookCalendlyWithParams(options) {
@@ -670,7 +671,8 @@ async function bookCalendlyWithParams(options) {
     calendlyUrl,
     name,
     email,
-    phone
+    phone,
+    browserOptions = {} // Accept browser options
   } = options;
   
   // Performance metrics
@@ -695,10 +697,18 @@ async function bookCalendlyWithParams(options) {
     // Start timing
     const startTime = Date.now();
     
-    // Check if IP Pool Server is running
-    const serverRunning = await isServerRunning();
+    // Check if IP Pool Server is available (try/catch to handle missing module)
+    let serverRunning = false;
+    try {
+      if (typeof isServerRunning === 'function') {
+        serverRunning = await isServerRunning().catch(() => false);
+      }
+    } catch (e) {
+      log('IP Pool module not available. Using direct connection.');
+    }
+    
     if (!serverRunning) {
-      log('IP Pool Server is not running. Using direct connection.');
+      log('IP Pool Server is not running or not available. Using direct connection.');
       // Continue without IP pool
     } else {
       log('IP Pool Server is running, proceeding with IP session...');
@@ -731,16 +741,45 @@ async function bookCalendlyWithParams(options) {
     try {
       // Try to get a pre-warmed browser if we have a session
       if (session) {
-        const browserData = await getWarmBrowser(session);
-        browser = browserData.browser;
-        page = browserData.page;
-        browserTime = (Date.now() - browserStartTime) / 1000;
-        log(`Got warm browser in ${browserTime.toFixed(2)}s`);
-      } else {
-        // Launch a new browser directly
-        browser = await chromium.launch({ 
+        try {
+          const browserData = await getWarmBrowser(session);
+          browser = browserData.browser;
+          page = browserData.page;
+          browserTime = (Date.now() - browserStartTime) / 1000;
+          log(`Got warm browser in ${browserTime.toFixed(2)}s`);
+        } catch (e) {
+          log(`Failed to get warm browser: ${e.message}. Launching new browser.`);
+          // Continue to launch a new browser below
+        }
+      }
+      
+      // Launch a new browser if we don't have one yet
+      if (!browser) {
+        // Default browser options
+        const defaultOptions = { 
           headless: true
-        });
+        };
+        
+        // For containerized environments like Render, add these args
+        const containerOptions = {
+          args: [
+            '--disable-gpu',
+            '--disable-dev-shm-usage',
+            '--disable-setuid-sandbox',
+            '--no-sandbox',
+          ]
+        };
+        
+        // Decide which options to use
+        const isContainer = process.env.NODE_ENV === 'production' || process.env.RENDER || process.env.CONTAINER;
+        const launchOptions = {
+          ...defaultOptions,
+          ...(isContainer ? containerOptions : {}),
+          ...browserOptions // Override with any custom options passed in
+        };
+        
+        log(`Launching browser with options: ${JSON.stringify(launchOptions)}`);
+        browser = await chromium.launch(launchOptions);
         
         // Create context with randomized settings
         const context = await browser.newContext({
@@ -791,7 +830,7 @@ async function bookCalendlyWithParams(options) {
           }
         });
       } catch (e) {
-        log('Request interception already set up');
+        log('Request interception already set up or not supported');
         // Continue anyway - interception might already be set up in warm browser
       }
       
@@ -808,7 +847,7 @@ async function bookCalendlyWithParams(options) {
       navigationTime = (Date.now() - navigationStartTime) / 1000;
       log(`Navigated to booking page in ${navigationTime.toFixed(2)}s`);
       
-      // Wait briefly for UI stabilization
+      // Reduced wait time - just enough for basic UI stabilization
       await new Promise(resolve => setTimeout(resolve, 500));
       
       // Get page title
