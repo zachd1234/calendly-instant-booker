@@ -1,6 +1,31 @@
 const express = require('express');
 const path = require('path');
 const { bookCalendlyWithParams } = require('./refined_index');
+const { chromium } = require('playwright');
+
+// Function to ensure browsers are installed
+async function ensureBrowsersInstalled() {
+  try {
+    console.log('Checking for Playwright browser installation...');
+    // Try launching browser to verify installation
+    const browser = await chromium.launch({ headless: true });
+    await browser.close();
+    console.log('Playwright browser already installed');
+  } catch (error) {
+    console.log('Installing Playwright browsers...');
+    try {
+      // If we're on a production server, we need to install browsers
+      const { execSync } = require('child_process');
+      execSync('npx playwright install chromium --with-deps', { stdio: 'inherit' });
+      console.log('Playwright browsers installed successfully');
+    } catch (installError) {
+      console.error('Failed to install Playwright browsers:', installError);
+    }
+  }
+}
+
+// Initial browser installation check
+ensureBrowsersInstalled();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -9,6 +34,11 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Health check endpoint for Render
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
 
 // Home route
 app.get('/', (req, res) => {
