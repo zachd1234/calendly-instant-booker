@@ -224,12 +224,15 @@ async function bookMeeting(page, name, email, phone) {
     // Fill the field if it was found in any stage
     if (phoneElement) {
         try {
-            console.log(`[BookingService] Filling phone number: ${phone}`);
+            // --- HARDCODE PHONE NUMBER HERE ---
+            const hardcodedPhone = '+1 3109122322'; 
+            console.log(`[BookingService] Filling phone number with HARDCODED value: ${hardcodedPhone}`); // Updated log
             // Use the stable selector 'phoneSelectorType' for filling
             await page.focus(phoneSelectorType);
             await page.click(phoneSelectorType, { clickCount: 3 });
             await page.keyboard.press('Backspace');
-            await page.fill(phoneSelectorType, phone);
+            // --- Use the hardcoded variable ---
+            await page.fill(phoneSelectorType, hardcodedPhone); 
             console.log('[BookingService] Phone field filled.');
             phoneFilled = true;
         } catch (fillError) {
