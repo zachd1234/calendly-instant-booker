@@ -122,7 +122,7 @@ async function humanType(page, selector, text) {
 
 // --- Main Booking Function ---
 // Now accepts parameters and an optional logCapture function
-async function runBooking(calendlyUrl, name, email, phone, useProxy, logCapture = console.log) { // Add useProxy param
+async function runBooking(calendlyUrl, name, email, phone, logCapture = console.log) { // Removed useProxy param
   logCapture('Starting Calendly booking process...');
   logCapture(`Using time slot URL: ${calendlyUrl}`);
   logCapture(`Booking for: Name=${name}, Email=${email}, Phone=${phone}`);
@@ -133,13 +133,14 @@ async function runBooking(calendlyUrl, name, email, phone, useProxy, logCapture 
   // --- Browser Setup ---
   browserStartTime = Date.now(); // Start timer
   logCapture(`Using proxy: ${PROXY_URL || 'None'}`);
-  logCapture(`Proxy enabled via setting: ${useProxy}`); // Log the setting
+  // Removed logging for useProxy setting
 
   let browser;
   let success = false;
   
-  // Determine proxy settings based on input and env vars
-  const proxySettings = useProxy && PROXY_URL && PROXY_USERNAME && PROXY_PASSWORD
+  // Removed conditional proxy logic based on useProxy
+  // Always determine proxy settings based on env vars
+  const proxySettings = PROXY_URL && PROXY_USERNAME && PROXY_PASSWORD
       ? {
           server: PROXY_URL,
           username: PROXY_USERNAME,
@@ -147,18 +148,16 @@ async function runBooking(calendlyUrl, name, email, phone, useProxy, logCapture 
         }
       : undefined;
 
-  if (useProxy && !proxySettings) {
-      logCapture('WARN: Proxy use requested, but required PROXY_URL/USERNAME/PASSWORD environment variables are not set. Proceeding without proxy.');
-  } else if (proxySettings) {
-      logCapture('Proxy configuration will be used.');
+  if (proxySettings) {
+      logCapture('Proxy configuration will be used (based on environment variables).');
   } else {
-      logCapture('Proxy configuration will not be used.');
+      logCapture('Proxy configuration will not be used (environment variables not set).');
   }
 
   try {
       browser = await chromium.launch({
         headless: true,
-        proxy: proxySettings // Use the determined settings
+        proxy: proxySettings // Use the determined settings based only on env vars
       });
 
       const context = await browser.newContext({

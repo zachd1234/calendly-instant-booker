@@ -28,7 +28,7 @@ app.post('/api/book', async (req, res) => {
   // Define logs array at the start of the handler
   const logs = [];
   try {
-    const { calendlyUrl, name, email, phone, useProxy } = req.body;
+    const { calendlyUrl, name, email, phone } = req.body;
     
     if (!calendlyUrl || !name || !email || !phone) {
        // Log the error before returning
@@ -54,7 +54,6 @@ app.post('/api/book', async (req, res) => {
       name,
       email,
       phone,
-      useProxy,
       logCapture // Pass the function here
     );
     
