@@ -206,16 +206,16 @@ async function runBooking(calendlyUrl, name, email, phone, logCapture = console.
         bookingStartTime = Date.now(); // Start timer
 
         // Call the imported function with parameters
-        const bookingServiceSuccess = await bookMeeting(page, name, email, phone, logCapture); // Pass logCapture here too
+        const bookingServiceResult = await bookMeeting(page, name, email, phone, logCapture); // Pass logCapture here too
 
         bookingDuration = (Date.now() - bookingStartTime) / 1000; // Calculate time
 
         // --- Log Result from bookingService ---
-        if (bookingServiceSuccess) {
+        if (bookingServiceResult.success) {
           logCapture(`✅ bookingService reported SUCCESS in ${bookingDuration.toFixed(2)}s.`);
           success = true;
         } else {
-          logCapture(`❌ bookingService reported FAILURE in ${bookingDuration.toFixed(2)}s.`);
+          logCapture(`❌ bookingService reported FAILURE in ${bookingDuration.toFixed(2)}s. Error: ${bookingServiceResult.error}`);
           if (!page.isClosed()) {
             await page.screenshot({ path: 'final-state-index-failure.png' }).catch(e => logCapture(`ERROR: Index screenshot failed: ${e.message}`));
           }

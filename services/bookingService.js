@@ -145,7 +145,7 @@ async function bookMeeting(page, name, email, phone) {
     try {
         console.log('[BookingService] Waiting for form container...');
         // Adjust selector if you find a more specific/stable one like 'form[data-testid="booking-form"]'
-        await page.waitForSelector('form', { state: 'visible', timeout: 7000 });
+        await page.waitForSelector('form', { state: 'visible', timeout: 15000 });
         console.log('[BookingService] Form container found.');
     } catch (e) {
         console.error('[BookingService] ❌ Error waiting for form container:', e.message);
