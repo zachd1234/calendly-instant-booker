@@ -7,9 +7,16 @@
 
 const express = require('express');
 const http = require('http');
-const ipPoolManager = require('./utils/ipPoolManager');
-const { initializeWarmBrowsersForSessions, getWarmBrowser, isWarmBrowserAvailable, getWarmBrowserStats, getWarmBrowserBySessionId } = require('./utils/warmBrowserManager');
-const config = require('./config');
+const ipPoolManager = require('./ipPoolManager');
+const {
+    createWarmBrowser,
+    isWarmBrowserAvailable,
+    getWarmBrowserStats,
+    cleanupAllBrowsers,
+    getWarmBrowserBySessionId,
+    initializeWarmBrowsersForSessions
+} = require('./warmBrowserManager');
+const config = require('../config');
 
 // Track if pool has been initialized
 let poolInitialized = false;
@@ -156,64 +163,59 @@ app.get('/api/health', (req, res) => {
 // Get an IP session from the pool
 app.get('/api/get-session', async (req, res) => {
   try {
-    // Wait for pool initialization if not complete
+    // 1. Wait for pool initialization if it's in progress (optional but good practice)
     if (!poolInitialized) {
-      console.log('Pool not initialized yet, waiting...');
-      try {
-        await initializationPromise;
-      } catch (error) {
-        console.error('Error waiting for pool initialization:', error);
-        return res.status(500).json({
-          error: 'Pool initialization failed',
-          message: error.message
-        });
+      console.log('[Server API /get-session] Pool not initialized yet, waiting...');
+      await initializationPromise; // Wait for the initialization attempt to finish
+      if(!poolInitialized) { // Check again after waiting
+          console.error('[Server API /get-session] Pool failed to initialize.');
+          // Use 503 Service Unavailable if the pool isn't ready
+          return res.status(503).json({ error: 'Pool initialization failed or not complete.' });
       }
+      console.log('[Server API /get-session] Pool initialization confirmed complete.');
     }
-    
-    // Make sure our session tracking is up to date
-    await updateWarmBrowserSessions();
-    
-    console.log(`Found ${sessionsWithWarmBrowsers.length} sessions with warm browsers available: ${sessionsWithWarmBrowsers.join(', ')}`);
-    
-    // Try to get a session with a warm browser first
-    let session = null;
-    
-    if (sessionsWithWarmBrowsers.length > 0) {
-      // Try each warm session in order
-      for (const warmSessionId of sessionsWithWarmBrowsers) {
-        session = await ipPoolManager.getSpecificSession(warmSessionId);
-        if (session) {
-          console.log(`Got specific session ${warmSessionId} with warm browser`);
-          break;
-        }
-      }
+
+    // 2. Get session details from the ipPoolManager
+    console.log('[Server API /get-session] Calling ipPoolManager.getIpSession...');
+    const session = await ipPoolManager.getIpSession(); // Gets { sessionId, server, username, password, release }
+
+    // Check if the manager returned a valid session
+    if (!session || !session.sessionId) {
+        console.error('[Server API /get-session] Failed to get valid session from ipPoolManager.');
+        return res.status(500).json({ error: 'Failed to get session from pool' });
     }
-    
-    // If no warm session was available, get any session
-    if (!session) {
-      console.log('No sessions with warm browsers found or available, using random session');
-      session = await ipPoolManager.getIpSession();
+     console.log(`[Server API /get-session] Got session ${session.sessionId} from manager.`);
+
+    // 3. *** Check warm browser status for THIS specific session ID ***
+    let hasWarmBrowser = false; // Default to false
+    try {
+        console.log(`[Server API /get-session] Checking warm status for session ${session.sessionId} via warmBrowserManager...`);
+        // Use the specific function imported from your warmBrowserManager
+        hasWarmBrowser = await isWarmBrowserAvailable(session.sessionId);
+        console.log(`[Server API /get-session] Warm status for ${session.sessionId}: ${hasWarmBrowser}`);
+    } catch (warmCheckError) {
+        // Log error but continue, reporting warm as false
+        console.error(`[Server API /get-session] Error checking warm status for ${session.sessionId}:`, warmCheckError.message);
+        hasWarmBrowser = false;
     }
-    
-    console.log(`IP session ${session.sessionId} returned to client`);
-    
-    // Check if we have a warm browser for this session
-    const hasWarmBrowser = await isWarmBrowserAvailable(session.sessionId);
-    console.log(`Session ${session.sessionId} warm browser available: ${hasWarmBrowser}`);
-    
-    // Return session info with warm browser status
+    // *** END CHECK ***
+
+    // 4. Return session info INCLUDING the correct warm status
+    console.log(`[Server API /get-session] Returning session ${session.sessionId} to client with warmAvailable=${hasWarmBrowser}`);
     res.json({
       server: session.server,
       username: session.username,
       password: session.password,
       sessionId: session.sessionId,
-      warmBrowserAvailable: hasWarmBrowser
+      warmBrowserAvailable: hasWarmBrowser // Pass the checked status
     });
+
   } catch (error) {
-    console.error('Error getting IP session:', error);
+    console.error('[Server API /get-session] Unexpected error in route handler:', error);
+    // Avoid sending detailed internal errors unless needed for specific debugging
     res.status(500).json({
-      error: 'Failed to get session',
-      message: error.message
+      error: 'Internal server error while getting session',
+      // message: error.message // Optionally include message for debugging
     });
   }
 });
@@ -393,7 +395,7 @@ process.on('SIGINT', async () => {
   server.close();
   
   // Then clean up resources
-  await require('./utils/warmBrowserManager').cleanupAllBrowsers();
+  await require('./warmBrowserManager').cleanupAllBrowsers();
   ipPoolManager.cleanupPool();
   
   console.log('Shutdown complete');

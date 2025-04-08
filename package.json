@@ -14,6 +14,7 @@
   "license": "ISC",
   "description": "Web application for automating Calendly appointment bookings",
   "dependencies": {
+    "axios": "^1.8.4",
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
     "https-proxy-agent": "^7.0.6",

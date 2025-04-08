@@ -108,12 +108,8 @@ async function getIpSession() {
     stats.sessionsRequested++;
     stats.lastSessionTime = new Date();
     
-    // Log if this session has a warm browser available
-    if (response.warmBrowserAvailable) {
-      console.log(`📊 Session ${response.sessionId} has a warm browser available`);
-    } else {
-      console.log(`📊 Session ${response.sessionId} does not have a warm browser available`);
-    }
+    // Log message about server-side warm status (informational only now)
+    console.log(`📊 Session ${response.sessionId} obtained. Server reported warm status: ${response.warmBrowserAvailable}`);
     
     return response;
   } catch (error) {
@@ -157,166 +153,86 @@ async function releaseSession(sessionId) {
 }
 
 /**
- * Check if a warm browser is available for a session
- * @param {string} sessionId - The session ID to check
- * @returns {Promise<boolean>} True if a warm browser is available
- */
-async function isWarmBrowserAvailable(sessionId) {
-  if (!sessionId) {
-    return false;
-  }
-  
-  try {
-    const response = await callApi(`/api/get-warm-browser?sessionId=${sessionId}`);
-    return response.warmBrowserAvailable === true;
-  } catch (error) {
-    console.error(`Error checking warm browser for session ${sessionId}:`, error.message);
-    return false;
-  }
-}
-
-/**
- * Get a warm browser from the pool or create a new one
- * @param {Object} session - The session object with proxy details
- * @param {Object} options - Additional options
- * @returns {Promise<Object>} Browser and page objects
+ * Creates a NEW local browser instance configured with the proxy from the provided session.
+ * Applies standard context settings (viewport, userAgent) and resource blocking.
+ * NOTE: This function *always* launches a new browser locally.
+ *
+ * @param {Object} session - The session object obtained from getIpSession, containing proxy details.
+ *                           Expected structure: { sessionId, server, username, password, ... }
+ * @param {Object} options - Optional: Currently unused, but kept for potential future flags.
+ * @returns {Promise<{ browser: import('playwright').Browser, context: import('playwright').BrowserContext, page: import('playwright').Page, creationTime: number }>}
+ *          An object containing the launched browser, context, page, and setup time.
+ * @throws {Error} If session details are invalid or browser launch/setup fails.
  */
 async function getWarmBrowser(session, options = {}) {
   const startTime = Date.now();
   
-  if (!session || !session.sessionId) {
-    throw new Error('Invalid session object');
+  // Validate session object structure for proxy details
+  if (!session || !session.sessionId || !session.server || !session.username || !session.password) {
+    // Added more specific check for necessary proxy fields from session
+    console.error("Invalid session object passed to getWarmBrowser. Session:", session);
+    throw new Error('Invalid session object provided to getWarmBrowser. Must include sessionId, server, username, password.');
   }
   
-  let browser, context, page;
+  let browser = null;
+  let context = null;
+  let page = null;
   
   try {
-    // Check if we should use a pre-warmed browser
-    if (!options.forceCold && session.warmBrowserAvailable) {
-      console.log(`🔥 Pre-warmed browser available for session ${session.sessionId}, checking availability...`);
-      
-      // Try to get warm browser details from the server
-      const warmBrowserInfo = await callApi(`/api/get-warm-browser?sessionId=${session.sessionId}`);
-      
-      if (warmBrowserInfo && warmBrowserInfo.warmBrowserAvailable === true) {
-        console.log(`Using warm browser for session ${session.sessionId}`);
-        stats.warmBrowsersUsed++;
-        
-        // Configure proxy if available
-        const proxyConfig = session.server ? {
-          server: session.server,
-          username: session.username,
-          password: session.password
-        } : undefined;
-        
-        // Instead of creating a new browser, we'll get a reference to the existing one
-        // from the server by making a special call
-        try {
-          // Create a browser connection to the warm browser on the server
-          // For now, we're still creating a new browser, but we could
-          // enhance the server to provide a way to connect to existing browsers
-          browser = await chromium.launch({
-            headless: true
-          });
-          
-          // Create a context with proxy
-          context = await browser.newContext({
-            proxy: proxyConfig,
-            viewport: { width: 1280, height: 800 },
-            userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-            bypassCSP: true,
-            ignoreHTTPSErrors: true
-          });
-          
-          // Create a page
-          page = await context.newPage();
-          
-          // Set up resource blocking
-          await context.route('**/*.{png,jpg,jpeg,gif,svg,webp}', route => route.abort());
-          await context.route('**/*.{woff,woff2,ttf,otf,eot}', route => route.abort());
-          await context.route('**/*ga*.js', route => route.abort());
-          await context.route('**/*facebook*.js', route => route.abort());
-          await context.route('**/*analytics*.js', route => route.abort());
-          
-          // Navigate to the URL that was already loaded in the warm browser
-          if (warmBrowserInfo.url) {
-            await page.goto(warmBrowserInfo.url, { waitUntil: 'domcontentloaded' });
-          }
-          
-          console.log(`Warm browser retrieved in ${((Date.now() - startTime) / 1000).toFixed(2)}s`);
-          
-          return {
-            browser,
-            context,
-            page,
-            creationTime: (Date.now() - startTime) / 1000,
-            wasWarm: true
-          };
-        } catch (warmError) {
-          console.error(`Error connecting to warm browser: ${warmError.message}`);
-          console.log('Falling back to creating a new browser');
-        }
-      } else {
-        console.log('Warm browser not actually available, creating new one');
-      }
-    }
-    
-    // If we get here, we need to create a new browser
-    console.log(`🧊 Creating new browser for session ${session.sessionId}`);
+    // --- Always Launch Locally (Simplified Path) ---
+    console.log(`[ipPoolClient] 🧊 Creating NEW local browser configured for session ${session.sessionId}...`);
     stats.coldBrowsersCreated++;
     
-    // Configure proxy if available
-    const proxyConfig = session.server ? {
+    // Configure proxy using details directly from the session object
+    const proxyConfig = {
       server: session.server,
       username: session.username,
       password: session.password
-    } : undefined;
+    };
+    console.log(`[ipPoolClient] Using proxy server: ${proxyConfig.server}`);
     
     // Launch browser with Playwright
     browser = await chromium.launch({
-      headless: true
+      headless: true,
+      proxy: proxyConfig
     });
     
-    // Create a context with proxy
+    // Create a context with standard settings
     context = await browser.newContext({
       proxy: proxyConfig,
       viewport: { width: 1280, height: 800 },
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
       bypassCSP: true,
-      ignoreHTTPSErrors: true
+      ignoreHTTPSErrors: true,
     });
     
     // Create a page
     page = await context.newPage();
     
-    // Set up resource blocking
-    await context.route('**/*.{png,jpg,jpeg,gif,svg,webp}', route => route.abort());
-    await context.route('**/*.{woff,woff2,ttf,otf,eot}', route => route.abort());
-    await context.route('**/*ga*.js', route => route.abort());
-    await context.route('**/*facebook*.js', route => route.abort());
-    await context.route('**/*analytics*.js', route => route.abort());
+    // Set up resource blocking (Essential for speed)
+    await context.route(
+        (url) => /\.(png|jpg|jpeg|gif|svg|webp|woff|woff2|ttf|otf|eot)$/i.test(url.pathname) ||
+                 /(google|ga|facebook|analytics|tracking|doubleclick|hotjar)\.com/i.test(url.hostname) ||
+                 /(google|ga|facebook|analytics|tracking|doubleclick|hotjar)/i.test(url.pathname),
+        (route) => route.abort().catch(err => console.error(`[ipPoolClient] Failed to abort route ${route.request().url()}: ${err.message}`))
+    );
+    console.log('[ipPoolClient] Resource blocking rules applied (images, fonts, tracking).');
     
-    console.log('Browser created in ' + ((Date.now() - startTime) / 1000).toFixed(2) + 's');
+    const creationTime = (Date.now() - startTime) / 1000;
+    console.log(`[ipPoolClient] Local browser setup complete for session ${session.sessionId} in ${creationTime.toFixed(2)}s`);
     
     return {
       browser,
       context,
       page,
-      creationTime: (Date.now() - startTime) / 1000,
-      wasWarm: false
+      creationTime: creationTime,
     };
   } catch (error) {
-    console.error(`Error creating browser: ${error.message}`);
-    
-    // Clean up in case of error
-    if (browser) {
-      try {
-        await browser.close();
-      } catch (e) {
-        // Ignore close errors
-      }
-    }
-    
+    console.error(`[ipPoolClient] Error during local browser setup for session ${session.sessionId}: ${error.message}`);
+    // Clean up partially created resources
+    if (page && !page.isClosed()) await page.close().catch(()=>{});
+    if (context) await context.close().catch(()=>{});
+    if (browser) await browser.close().catch(()=>{});
     throw error;
   }
 }
@@ -364,7 +280,6 @@ module.exports = {
   getIpSession,
   getSpecificSession,
   releaseSession,
-  isWarmBrowserAvailable,
   getWarmBrowser,
   getPoolStats,
   getWarmBrowserStats,
