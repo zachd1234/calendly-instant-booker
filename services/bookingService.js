@@ -150,7 +150,7 @@ async function bookMeeting(page, name, email, phone) {
     } catch (e) {
         console.error('[BookingService] ❌ Error waiting for form container:', e.message);
         if (DEBUG_MODE) await page.screenshot({ path: 'error-no-form-container.png' });
-        return false; // Cannot proceed if form doesn't appear
+        return { success: false, error: `Failed to find form container: ${e.message}` };
     }
 
     // *** PARALLEL FIELD FINDING ***
@@ -180,7 +180,7 @@ async function bookMeeting(page, name, email, phone) {
         console.error('[BookingService] Failed to find required fields in parallel:', error.message);
         // Optional: Screenshot on failure
         if (DEBUG_MODE) await page.screenshot({ path: 'error-parallel-field-find.png' }).catch(()=>{});
-        return false; // Cannot proceed if required fields aren't found
+        return { success: false, error: `Failed parallel field find: ${error.message}` };
     }
     
     // *** REMOVED Sequential Retry Loops for Name and Email ***
@@ -407,11 +407,12 @@ async function bookMeeting(page, name, email, phone) {
         if (result === 'success') {
             console.log('[BookingService] ✅ Explicit confirmation indicator found.');
             if (DEBUG_MODE) await page.screenshot({ path: 'confirmed-service.png' });
-            return true;
+            return { success: true };
         } else if (result === 'error') {
              // Already logged the specific error in the Promise.race handler
              if (DEBUG_MODE) await page.screenshot({ path: 'error-explicit-service.png' });
-            return false;
+             const errorText = await errorElement?.textContent() || 'Unknown explicit error'; // Get error text if possible
+             return { success: false, error: `Explicit error detected: ${errorText.trim()}` };
         } else { // result === 'timeout'
             console.log('[BookingService] ⚠️ Timed out waiting for explicit confirmation or general error indicator. Checking for specific popups...');
 
@@ -425,7 +426,7 @@ async function bookMeeting(page, name, email, phone) {
                  if (await unavailableHeading.isVisible({ timeout: 5000 })) { 
                       console.error(`[BookingService] ❌ Detected post-submit message after timeout: "${unavailableText}"`);
                       if (DEBUG_MODE) await page.screenshot({ path: 'error-slot-unavailable-post-submit.png' });
-                      return false; // Treat as failure
+                      return { success: false, error: `Slot became unavailable post-submit: "${unavailableText}"` };
                  } else {
                     // Log if the check was performed but element wasn't visible within the extended secondary timeout
                     console.log(`[BookingService] Post-submit unavailable heading not found/visible within extra 5s check.`);
@@ -443,23 +444,23 @@ async function bookMeeting(page, name, email, phone) {
              if (confirmationKeywords.some(keyword => lowerBodyText.includes(keyword))) {
                  console.log('[BookingService] Found weak confirmation text in body after timeout.');
                  if (DEBUG_MODE) await page.screenshot({ path: 'final-state-weak-confirm-service.png' });
-                 return true; // Optimistic return based on weak text
+                 return { success: true };
              }
             if (DEBUG_MODE) await page.screenshot({ path: 'timeout-no-confirm-service.png' });
-            return false; // Return false if timed out without any confirmation sign
+            return { success: false, error: 'Timed out waiting for confirmation (30s)' };
         }
 
      } catch (e) {
          console.log(`[BookingService] Error during confirmation wait logic: ${e.message}.`);
           if (DEBUG_MODE) await page.screenshot({ path: 'error-confirmation-logic-service.png' });
          // Consider checking for explicit error elements even in this catch block if needed
-         return false; // Return false if the wait logic itself failed
+         return { success: false, error: `Error in confirmation logic: ${e.message}` };
      }
 
   } catch (error) {
     console.error('[BookingService] ❌ Unhandled error during booking process:', error);
     if (DEBUG_MODE) await page.screenshot({ path: 'error-uncaught-service.png' }).catch(() => {});
-    return false; // Return false on unhandled error
+    return { success: false, error: `Unhandled error in bookingService: ${error.message}` };
   }
   // Note: We do not close the page, context, or browser here. The caller is responsible.
 }
