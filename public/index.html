@@ -164,12 +164,17 @@
                 <input type="tel" id="phone" name="phone" required placeholder="+1 3109122380">
             </div>
             
+            <div class="form-group">
+                <input type="checkbox" id="use-proxy" name="useProxy" checked>
+                <label for="use-proxy">Use Proxy (if configured)</label>
+            </div>
+            
             <button type="submit" id="submit-btn">Book Appointment</button>
         </form>
         
         <div class="loading" id="loading">
             <div class="spinner"></div>
-            <p>Booking your appointment... This may take a minute.</p>
+            <p>Booking appointment... This may take longer than expected because Render instance needs to spin up.</p>
         </div>
         
         <div class="results" id="results" style="display: none;">
@@ -215,7 +220,8 @@
                     calendlyUrl: document.getElementById('calendly-url').value.trim(),
                     name: document.getElementById('name').value.trim(),
                     email: document.getElementById('email').value.trim(),
-                    phone: document.getElementById('phone').value.trim()
+                    phone: document.getElementById('phone').value.trim(),
+                    useProxy: document.getElementById('use-proxy').checked
                 };
                 
                 try {
