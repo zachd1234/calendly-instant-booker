@@ -185,60 +185,46 @@ async function bookMeeting(page, name, email, phone) {
     
     // *** REMOVED Sequential Retry Loops for Name and Email ***
 
-    // --- *** REVISED Phone Field Handling (Multi-Stage Check) *** ---
-    console.log('[BookingService] Locating phone field (multi-stage check)...');
-    const phoneSelectorType = 'input[type="tel"]'; // Use type selector for stability
+    // --- *** REVISED Phone Field Handling (Check Container First) *** ---
+    console.log('[BookingService] Checking for phone field container...');
+    const phoneContainerSelector = 'div[data-component="phone-field"]';
+    const quickContainerTimeout = 500; // Very quick check for the container
+    const phoneInputSelector = 'input[type="tel"]'; // Selector for the actual input
+    const longerInputTimeout = 5000; // Longer wait if container is found (5 seconds)
     let phoneFilled = false;
-    let phoneElement = null;
 
-    // Stage 1: Quick Check (1.5 seconds)
-    console.log('[BookingService] Phone Check - Stage 1 (Quick: 1.5s timeout)...');
     try {
-        phoneElement = await page.waitForSelector(phoneSelectorType, { state: 'visible', timeout: 1500 });
-        console.log('[BookingService] Found phone field in Stage 1.');
-    } catch (e) {
-        console.log('[BookingService] Phone field not found in Stage 1. Waiting 0.5s...');
-        await page.waitForTimeout(500); // Short wait after first failure
+        // 1. Quick check for the container (attached is enough)
+        await page.waitForSelector(phoneContainerSelector, { state: 'attached', timeout: quickContainerTimeout });
+        console.log('[BookingService] Phone field container found. Now checking for input field...');
 
-        // Stage 2: Medium Check (3 seconds)
-        console.log('[BookingService] Phone Check - Stage 2 (Medium: 3s timeout)...');
+        // 2. Container found, now wait longer for the actual input field to be visible
         try {
-            phoneElement = await page.waitForSelector(phoneSelectorType, { state: 'visible', timeout: 3000 });
-            console.log('[BookingService] Found phone field in Stage 2.');
-        } catch (e2) {
-            console.log('[BookingService] Phone field not found in Stage 2. Waiting 1s...');
-            await page.waitForTimeout(1000); // Longer wait after second failure
-
-            // Stage 3: Final Check (5 seconds)
-            console.log('[BookingService] Phone Check - Stage 3 (Final: 5s timeout)...');
+            const phoneElement = await page.waitForSelector(phoneInputSelector, { state: 'visible', timeout: longerInputTimeout });
+            console.log('[BookingService] Found phone input field.');
+            
+            // 3. Fill the input field
             try {
-                phoneElement = await page.waitForSelector(phoneSelectorType, { state: 'visible', timeout: 5000 });
-                console.log('[BookingService] Found phone field in Stage 3.');
-            } catch (e3) {
-                console.log('[BookingService] Phone field not found after all stages. Skipping phone field.');
-                phoneElement = null; // Ensure it's null if not found
+                const hardcodedPhone = '+1 3109122322';
+                console.log(`[BookingService] Filling phone number with HARDCODED value: ${hardcodedPhone}`);
+                await page.focus(phoneInputSelector);
+                await page.click(phoneInputSelector, { clickCount: 3 });
+                await page.keyboard.press('Backspace');
+                await page.fill(phoneInputSelector, hardcodedPhone);
+                console.log('[BookingService] Phone field filled.');
+                phoneFilled = true;
+            } catch (fillError) {
+                console.error(`[BookingService] ⚠️ Error filling phone field even after finding input: ${fillError.message}`);
             }
-        }
-    }
 
-    // Fill the field if it was found in any stage
-    if (phoneElement) {
-        try {
-            // --- HARDCODE PHONE NUMBER HERE ---
-            const hardcodedPhone = '+1 3109122322'; 
-            console.log(`[BookingService] Filling phone number with HARDCODED value: ${hardcodedPhone}`); // Updated log
-            // Use the stable selector 'phoneSelectorType' for filling
-            await page.focus(phoneSelectorType);
-            await page.click(phoneSelectorType, { clickCount: 3 });
-            await page.keyboard.press('Backspace');
-            // --- Use the hardcoded variable ---
-            await page.fill(phoneSelectorType, hardcodedPhone); 
-            console.log('[BookingService] Phone field filled.');
-            phoneFilled = true;
-        } catch (fillError) {
-             console.error(`[BookingService] ⚠️ Error filling phone field even after finding it: ${fillError.message}`);
-             // Continue without phone if filling fails
+        } catch (inputError) {
+            // Container was found, but input field didn't appear within the longer timeout
+            console.log(`[BookingService] Phone container found, but input field ('${phoneInputSelector}') did not become visible within ${longerInputTimeout / 1000}s. Skipping fill attempt.`);
         }
+
+    } catch (containerError) {
+        // Container not found in the initial quick check
+        console.log(`[BookingService] Phone field container ('${phoneContainerSelector}') not found within ${quickContainerTimeout}ms. Assuming no phone field required.`);
     }
     // --- *** END REVISED Phone Field Handling *** ---
 
