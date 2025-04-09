@@ -6,108 +6,140 @@ const { bookMeeting } = require('./services/bookingService');
 const { activeSessions } = require('./sessionManager');
 
 // --- Step 2: Book Session Function ---
-async function bookSession(sessionId, fullBookingUrl, name, email, phone) {
-    // Retrieve the session - including the logCapture function stored during startSession
+async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCapture) {
+    // Retrieve the session object WHICH MIGHT CONTAIN ITS OWN logCapture, but we prioritize the passed one
     const session = activeSessions[sessionId];
 
-    // Use the logCapture associated with this specific session, default to console.log if missing
-    const logCapture = session?.logCapture || console.log;
+    // Now, 'logCapture' refers directly to the function passed in from server.js
 
-    logCapture(`[${sessionId}] Received request to book session.`);
-    logCapture(`[${sessionId}] Booking URL: ${fullBookingUrl}`);
-    logCapture(`[${sessionId}] Details: Name=${name}, Email=${email}, Phone=${phone}`);
-    const overallStartTime = Date.now(); // Timer for this step
+    // Add a check log immediately using the passed-in logger
+    if (!logCapture) {
+        // Fallback if something went wrong and logCapture wasn't passed (shouldn't happen with current server.js)
+        console.error(`[${sessionId}] CRITICAL: logCapture function was not provided to bookSession!`);
+        logCapture = console.log; // Use console as a last resort
+    }
+
+    logCapture(`[${sessionId}] Executing bookSession in ISP_index.js.`);
+    logCapture(`[${sessionId}] Received request details: URL=${fullBookingUrl}, Name=${name}, Email=${email}, Phone=${phone}`);
+
+    const overallStartTime = Date.now();
 
     let navigationTime = 0;
     let bookingServiceDuration = 0;
-    let stepSuccess = false; // Track success of this step specifically
+    let stepSuccess = false;
+    let bookingServiceResult = null; // Declared
 
-    // Check if the session exists
+    // 1. Validate Session
+    logCapture(`[${sessionId}] Validating session...`);
     if (!session || !session.page || !session.browser) {
         const errorMsg = `Session ID ${sessionId} not found or session expired/invalid.`;
-        logCapture(`[${sessionId}] ❌ ERROR: ${errorMsg}`);
-        // Ensure session is removed if partially invalid
-        if (activeSessions[sessionId]) delete activeSessions[sessionId];
+        logCapture(`[${sessionId}] ❌ ERROR: Session validation failed. ${errorMsg}`);
+        if (activeSessions[sessionId]) {
+            logCapture(`[${sessionId}] Removing potentially invalid session remnant from active map.`);
+            delete activeSessions[sessionId];
+        }
+        // Ensure return value includes session ID even on early failure
         return { success: false, error: errorMsg, duration: 0, sessionId: sessionId };
     }
+    logCapture(`[${sessionId}] Session validated successfully. Page and browser objects exist.`);
 
-    const { page, browser } = session; // Extract page and browser from the session
+    const { page, browser } = session;
 
     try {
-        // --- Navigation using existing page ---
+        // 2. Navigation using existing page
         const navigationStartTime = Date.now();
-        logCapture(`[${sessionId}] Navigating warmed page to specific booking URL: ${fullBookingUrl}`);
+        logCapture(`[${sessionId}] Attempting navigation of existing page to: ${fullBookingUrl}`);
         await page.goto(fullBookingUrl, {
-          waitUntil: 'domcontentloaded', // Should be faster now
-          timeout: 45000 // Keep a reasonable timeout
+          waitUntil: 'domcontentloaded',
+          timeout: 45000
         });
         navigationTime = (Date.now() - navigationStartTime) / 1000;
-        logCapture(`[${sessionId}] Navigated to booking page in ${navigationTime.toFixed(2)}s`);
-        logCapture(`[${sessionId}] Page title: ${await page.title().catch(() => 'Error getting title')}`);
+        logCapture(`[${sessionId}] Page navigation completed in ${navigationTime.toFixed(2)}s`);
+        const pageTitle = await page.title().catch((err) => {
+             logCapture(`[${sessionId}] WARN: Failed to get page title after navigation: ${err.message}`);
+             return 'Error getting title';
+        });
+        logCapture(`[${sessionId}] Page title after navigation: ${pageTitle}`);
 
-        // --- Hand off to Booking Service using existing page ---
-        logCapture(`[${sessionId}] Handing off to bookingService...`);
+        // 3. Hand off to Booking Service
+        logCapture(`[${sessionId}] Preparing to hand off to bookingService...`);
         const bookingStartTime = Date.now();
-
-        // Call the imported bookingService function with the existing page
-        const bookingServiceResult = await bookMeeting(page, name, email, phone, logCapture);
-
+        bookingServiceResult = await bookMeeting(page, name, email, phone, logCapture); // Call bookingService
         bookingServiceDuration = (Date.now() - bookingStartTime) / 1000;
+        logCapture(`[${sessionId}] bookingService call completed in ${bookingServiceDuration.toFixed(2)}s.`);
 
-        // --- Log Result from bookingService ---
-        if (bookingServiceResult.success) {
-          logCapture(`[${sessionId}] ✅ bookingService reported SUCCESS in ${bookingServiceDuration.toFixed(2)}s.`);
-          stepSuccess = true; // Mark this step as successful
+        // 4. Log Result from bookingService
+        if (bookingServiceResult && bookingServiceResult.success) { // Check if result object exists
+          logCapture(`[${sessionId}] ✅ bookingService reported SUCCESS.`);
+          stepSuccess = true;
         } else {
-          logCapture(`[${sessionId}] ❌ bookingService reported FAILURE in ${bookingServiceDuration.toFixed(2)}s. Error: ${bookingServiceResult.error}`);
-          // bookingService might take screenshots, or we could take one here
-          if (!page.isClosed()) {
+          // Log the failure reason more clearly
+          const serviceError = bookingServiceResult?.error || "Unknown booking service error";
+          logCapture(`[${sessionId}] ❌ bookingService reported FAILURE. Reason: ${serviceError}`);
+          // Log the full result object on failure for debugging (optional)
+          // logCapture(`[${sessionId}] Full bookingServiceResult on failure: ${JSON.stringify(bookingServiceResult)}`);
+          if (page && !page.isClosed()) { // Check page before screenshot
+            logCapture(`[${sessionId}] Attempting screenshot on booking failure: session_book_failure_${sessionId}.png`);
             await page.screenshot({ path: `session_book_failure_${sessionId}.png` }).catch(e => logCapture(`[${sessionId}] ERROR: Failure screenshot failed: ${e.message}`));
           }
           stepSuccess = false;
         }
 
       } catch (error) {
-        logCapture(`[${sessionId}] ❌ Error during session booking execution: ${error}`);
+        // Log errors caught within the try block (e.g., navigation failure)
+        logCapture(`[${sessionId}] ❌ CAUGHT ERROR during booking execution: ${error.message || error}`);
+        logCapture(`[${sessionId}] Error stack trace: ${error.stack}`); // Log stack trace
         stepSuccess = false;
+        // Ensure bookingServiceResult has an error representation if the error happened before/during its call
+        if (!bookingServiceResult) { bookingServiceResult = { error: `Caught error: ${error.message}` }; }
         if (page && !page.isClosed()) {
+            logCapture(`[${sessionId}] Attempting screenshot on caught error: session_book_error_${sessionId}.png`);
             await page.screenshot({ path: `session_book_error_${sessionId}.png` }).catch(e => logCapture(`[${sessionId}] ERROR: Error screenshot failed: ${e.message}`));
         }
-        // Need to ensure cleanup happens even if error occurs mid-way
   } finally {
-        // --- Session Cleanup ---
-        // Always close the browser and remove the session after attempting the booking
-        logCapture(`[${sessionId}] Booking attempt finished. Closing browser and removing session...`);
+        // 5. Session Cleanup
+        logCapture(`[${sessionId}] Entering finally block for cleanup...`);
         try {
-    if (browser) {
+            if (browser && typeof browser.close === 'function') { // Extra check for browser object and close method
+                 logCapture(`[${sessionId}] Closing browser...`);
                  await browser.close();
-                 logCapture(`[${sessionId}] Browser closed.`);
-    } else {
-                 logCapture(`[${sessionId}] Browser object was missing, cannot close.`);
+                 logCapture(`[${sessionId}] Browser closed successfully.`);
+            } else {
+                 logCapture(`[${sessionId}] WARN: Browser object was missing or invalid during cleanup.`);
             }
         } catch (closeError) {
-            logCapture(`[${sessionId}] ❌ ERROR closing browser: ${closeError.message}`);
+            logCapture(`[${sessionId}] ❌ ERROR during browser close: ${closeError.message}`);
         } finally {
             // Always remove from active sessions map
             if (activeSessions[sessionId]) {
+                 logCapture(`[${sessionId}] Removing session from active map.`);
                  delete activeSessions[sessionId];
                  logCapture(`[${sessionId}] Session removed from active map.`);
+            } else {
+                logCapture(`[${sessionId}] Session already removed from active map or never added correctly.`);
             }
         }
+        logCapture(`[${sessionId}] Finished finally block.`);
     }
 
+    // 6. Final Logging and Return
     const overallDuration = (Date.now() - overallStartTime) / 1000;
-    logCapture(`[${sessionId}] bookSession step completed in ${overallDuration.toFixed(2)} seconds. Result: ${stepSuccess ? 'Success' : 'Failure'}`);
+    logCapture(`[${sessionId}] bookSession (ISP_index.js) finished. Overall duration: ${overallDuration.toFixed(2)}s. Final Result: ${stepSuccess ? 'Success' : 'Failure'}`);
 
-    // Return detailed result object for this step
-  return {
+    // Restructure the return object to match frontend expectations
+    return {
         success: stepSuccess,
-        sessionId: sessionId, // Include sessionId in response
-      duration: parseFloat(overallDuration.toFixed(2)),
-      navigationTime: parseFloat(navigationTime.toFixed(2)),
-        bookingServiceDuration: parseFloat(bookingServiceDuration.toFixed(2)), // Time spent *only* in bookingService
-        // Include specific error message if booking failed
-        error: stepSuccess ? undefined : (bookingServiceResult?.error || "Booking step failed")
+        sessionId: sessionId,
+        duration: parseFloat(overallDuration.toFixed(2)), // Overall total time
+        // Add the nested metrics object
+        metrics: {
+            browserTime: undefined, // This isn't calculated in bookSession, set to undefined or null
+            navigationTime: parseFloat(navigationTime.toFixed(2)), // Use the calculated navigation time
+            formTime: parseFloat(bookingServiceDuration.toFixed(2)) // Map bookingServiceDuration to formTime
+        },
+        error: stepSuccess ? undefined : (bookingServiceResult?.error || "Booking step failed in ISP_index"),
+        // Keep logs at the top level as server.js expects it there to merge
+        // logs: logCapture.getLogs ? logCapture.getLogs() : [] // Only if logCapture had a method to retrieve logs
     };
 }
 

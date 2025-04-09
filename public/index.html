@@ -192,9 +192,15 @@
                     <input type="email" id="email" name="email" required placeholder="john@example.com">
                 </div>
 
-                <div class="form-group">
-                    <label for="phone">Phone Number:</label>
-                    <input type="tel" id="phone" name="phone" required placeholder="+1 3109122380">
+                <div class="form-group" style="display: flex; gap: 10px;">
+                    <div style="flex: 0 0 80px;">
+                        <label for="phone-country-code">Code</label>
+                        <input type="text" id="phone-country-code" name="phoneCountryCode" required placeholder="+1" style="text-align: center;">
+                    </div>
+                    <div style="flex: 1;">
+                        <label for="phone-number">Phone Number</label>
+                        <input type="tel" id="phone-number" name="phoneNumber" required placeholder="3109122380 (no spaces/dashes)">
+                    </div>
                 </div>
 
                 <button type="submit" id="submit-btn"> Book Appointment</button>
@@ -341,13 +347,27 @@
                 loading.style.display = 'block';
 
                 // Get form data
+                const countryCode = document.getElementById('phone-country-code').value.trim();
+                const number = document.getElementById('phone-number').value.trim().replace(/[\s-]/g, ''); // Remove spaces/dashes from number part
+                const combinedPhone = `${countryCode} ${number}`; // Format: +1 1234567890
+
                 const formData = {
-                    sessionId: currentSessionId, // Use the stored session ID
+                    sessionId: currentSessionId,
                     fullBookingUrl: document.getElementById('calendly-url').value.trim(),
                     name: document.getElementById('name').value.trim(),
                     email: document.getElementById('email').value.trim(),
-                    phone: document.getElementById('phone').value.trim()
+                    phone: combinedPhone // Use the combined phone string
                 };
+
+                // Validate combinedPhone format (basic check) - Optional but recommended client-side
+                const phoneRegex = /^\+\d{1,4}\s\d{7,}$/; // Example: + followed by 1-4 digits, space, then 7+ digits
+                if (!phoneRegex.test(combinedPhone)) {
+                    error.textContent = 'Invalid phone format. Please use format like "+1 1234567890". Check country code and number.';
+                    error.style.display = 'block';
+                    loading.style.display = 'none';
+                    submitBtn.disabled = false;
+                    return; // Stop submission
+                }
 
                 try {
                     // Make API request to the new endpoint

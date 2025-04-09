@@ -2,8 +2,8 @@ const express = require('express');
 const path = require('path');
 // Import startSession from sessionManager (no init needed)
 const { startSession } = require('./sessionManager');
-// Import bookSession from isp_dom_index
-const { bookSession } = require('./isp_dom_index');
+// Import bookSession from ISP_index instead of isp_dom_index
+const { bookSession } = require('./ISP_index');
 
 // Create Express app
 const app = express();
@@ -81,16 +81,30 @@ app.post('/api/book-session', async (req, res) => {
     try {
         const { sessionId, fullBookingUrl, name, email, phone } = req.body;
 
-        if (!sessionId || !fullBookingUrl || !name || !email || !phone) {
-            logCapture('ERROR: Missing required fields for book-session.'); // Use logCapture
+        // --- ADD SERVER-SIDE VALIDATION ---
+        const phoneRegex = /^\+\d{1,4}\s\d{7,}$/; // Same regex as frontend (or stricter)
+        if (!sessionId || !fullBookingUrl || !name || !email || !phone || !phoneRegex.test(phone)) {
+            let missingFields = [];
+            if (!sessionId) missingFields.push('sessionId');
+            if (!fullBookingUrl) missingFields.push('fullBookingUrl');
+            if (!name) missingFields.push('name');
+            if (!email) missingFields.push('email');
+            if (!phone) missingFields.push('phone');
+            let message = `Missing or invalid required fields: ${missingFields.join(', ')}.`;
+            if (phone && !phoneRegex.test(phone)) {
+                message += ' Phone format invalid (Expected: +1 123...).';
+            }
+
+            logCapture(`ERROR: Missing/Invalid required fields for book-session. Provided: ${JSON.stringify(req.body)}`);
             return res.status(400).json({
                 success: false,
-                message: 'Missing required fields: sessionId, fullBookingUrl, name, email, phone.',
-                logs: logs // Include collected logs even in error response
+                message: message,
+                logs: logs
             });
         }
+        // --- END VALIDATION ---
 
-        // Pass the logCapture function to bookSession
+        // Pass the validated data to bookSession
         const result = await bookSession(sessionId, fullBookingUrl, name, email, phone, logCapture);
 
         // We now have the logs collected in the `logs` array.

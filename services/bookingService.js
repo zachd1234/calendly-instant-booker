@@ -353,6 +353,7 @@ async function bookMeeting(page, name, email, phone) {
         console.log('[BookingService] Waiting for explicit confirmation or error indicators (max 30s)...');
 
         const successSelectors = [
+            'div[data-container="booking-container"]',
             'div.confirmation-page',
             'h1:has-text("Confirmed")',
             'h1:has-text("You are scheduled")',
@@ -372,10 +373,10 @@ async function bookMeeting(page, name, email, phone) {
              // Add more specific selectors for other known errors
         ];
 
-        // Promise for detecting success - Increased timeout
+        // Promise for detecting success - Keep timeout at 30s for now, can increase if needed
         const successPromise = page.locator(successSelectors.join(', ')).first().waitFor({ state: 'visible', timeout: 30000 });
 
-        // Promise for detecting error - Increased timeout
+        // Promise for detecting error - Keep timeout at 30s
         const errorPromise = page.locator(errorSelectors.join(', ')).first().waitFor({ state: 'visible', timeout: 30000 });
 
         // Race the promises
@@ -384,9 +385,10 @@ async function bookMeeting(page, name, email, phone) {
             errorPromise.then(async (errorElement) => {
                  const errorText = await errorElement.textContent();
                  console.error(`[BookingService] ❌ Explicit error detected: ${errorText?.trim()}`);
+                 // Capture screenshot specifically on detected error
+                 if (DEBUG_MODE && page && !page.isClosed()) await page.screenshot({ path: 'error-explicit-detected-service.png' }).catch(e=>console.log(e.message));
                  return 'error'; // Return 'error' if error element appears
             }).catch(() => null),
-            // Increased fallback timeout
             page.waitForTimeout(30000).then(() => 'timeout') // Return 'timeout' if neither appears within 30s
         ]);
 
@@ -399,41 +401,34 @@ async function bookMeeting(page, name, email, phone) {
             return { success: true };
         } else if (result === 'error') {
              // Already logged the specific error in the Promise.race handler
-             if (DEBUG_MODE) await page.screenshot({ path: 'error-explicit-service.png' });
-             const errorText = await errorElement?.textContent() || 'Unknown explicit error'; // Get error text if possible
+             const errorText = await errorElement?.textContent() || 'Unknown explicit error'; // Attempt to get error text again
              return { success: false, error: `Explicit error detected: ${errorText.trim()}` };
         } else { // result === 'timeout'
             console.log('[BookingService] ⚠️ Timed out waiting for explicit confirmation or general error indicator. Checking for specific popups...');
 
-            // *** UPDATED AGAIN: Explicit check for post-submit unavailable popup after timeout ***
+            // *** Check for post-submit unavailable popup after timeout ***
             const unavailableText = "Sorry, that time is no longer available.";
             try {
-                 // Use getByRole, but give this specific check a bit more time
                  const unavailableHeading = page.getByRole('heading', { name: unavailableText, exact: false });
-                 
-                 // Increased timeout for this specific secondary check to 5000ms
-                 if (await unavailableHeading.isVisible({ timeout: 5000 })) { 
+                 if (await unavailableHeading.isVisible({ timeout: 5000 })) { // 5s check
                       console.error(`[BookingService] ❌ Detected post-submit message after timeout: "${unavailableText}"`);
                       if (DEBUG_MODE) await page.screenshot({ path: 'error-slot-unavailable-post-submit.png' });
                       return { success: false, error: `Slot became unavailable post-submit: "${unavailableText}"` };
                  } else {
-                    // Log if the check was performed but element wasn't visible within the extended secondary timeout
                     console.log(`[BookingService] Post-submit unavailable heading not found/visible within extra 5s check.`);
                  }
             } catch (e) {
-                 // Error here likely means timeout occurred during the isVisible check for the heading
                  console.log(`[BookingService] Error or timeout during secondary check for unavailable heading: ${e.message}`);
             }
-            // *** END UPDATED CHECK ***
+            // *** END CHECK ***
 
-            // Optional: Check body text one last time as a weak confirmation
              const bodyText = await page.locator('body').textContent({ timeout: 1000 }).catch(() => '');
              const lowerBodyText = bodyText.toLowerCase();
              const confirmationKeywords = ['confirmed', 'success', 'thank you', 'scheduled', 'booked', 'complete'];
              if (confirmationKeywords.some(keyword => lowerBodyText.includes(keyword))) {
                  console.log('[BookingService] Found weak confirmation text in body after timeout.');
                  if (DEBUG_MODE) await page.screenshot({ path: 'final-state-weak-confirm-service.png' });
-                 return { success: true };
+                 return { success: true }; // Consider it success if keywords found after timeout
              }
             if (DEBUG_MODE) await page.screenshot({ path: 'timeout-no-confirm-service.png' });
             return { success: false, error: 'Timed out waiting for confirmation (30s)' };
@@ -442,7 +437,6 @@ async function bookMeeting(page, name, email, phone) {
      } catch (e) {
          console.log(`[BookingService] Error during confirmation wait logic: ${e.message}.`);
           if (DEBUG_MODE) await page.screenshot({ path: 'error-confirmation-logic-service.png' });
-         // Consider checking for explicit error elements even in this catch block if needed
          return { success: false, error: `Error in confirmation logic: ${e.message}` };
      }
 
