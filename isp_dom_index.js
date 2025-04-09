@@ -1,8 +1,7 @@
-
 require('dotenv').config(); // Still needed if bookingService uses env vars? Review dependencies.
 const { bookMeeting } = require('./services/bookingService');
 // Import activeSessions map from sessionManager to find and delete sessions
-const { activeSessions } = require('./sessionManager');
+const { activeSessions, browserPool } = require('./sessionManager');
 
 // --- Helper: Parse Date/Time from Calendly URL ---
 function parseCalendlyUrl(url) {
@@ -203,18 +202,27 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone) {
             await page.screenshot({ path: `session_book_dom_error_${sessionId}.png` }).catch(err => logCapture(`[${sessionId}] ERROR: DOM error screenshot failed: ${err.message}`));
         }
     } finally {
-        // --- Session Cleanup ---
-        // Always close the browser and remove the session after attempting the booking
+        // --- Session Cleanup (Simplified: Just close browser) ---
         logCapture(`[${sessionId}] Booking attempt finished. Closing browser and removing session...`);
+        const sessionForCleanup = activeSessions[sessionId]; // Get session to access browser
+        const browserForCleanup = sessionForCleanup?.browser;
+
+        // Close the browser instance used by this session
         try {
-            if (browser) {
-                await browser.close();
+            if (browserForCleanup) {
+                await browserForCleanup.close();
                 logCapture(`[${sessionId}] Browser closed.`);
+            } else {
+                logCapture(`[${sessionId}] WARN: Browser object missing in session during cleanup.`);
             }
-            if (activeSessions[sessionId]) delete activeSessions[sessionId];
-            logCapture(`[${sessionId}] Session removed.`);
-        } catch (e) {
-            logCapture(`[${sessionId}] ERROR: Error during session cleanup: ${e.message}`);
+        } catch (closeError) {
+            logCapture(`[${sessionId}] ❌ ERROR closing browser: ${closeError.message}`);
+        }
+
+        // Always remove session from active map
+        if (activeSessions[sessionId]) {
+            delete activeSessions[sessionId];
+            logCapture(`[${sessionId}] Session removed from active map.`);
         }
     }
 

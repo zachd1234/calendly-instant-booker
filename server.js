@@ -1,9 +1,9 @@
 const express = require('express');
 const path = require('path');
-// Import startSession from sessionManager
+// Import startSession from sessionManager (no init needed)
 const { startSession } = require('./sessionManager');
-// Import bookSession from the RENAMED file
-const { bookSession } = require('./isp_dom_index'); // Updated require
+// Import bookSession from isp_dom_index
+const { bookSession } = require('./isp_dom_index');
 
 // Create Express app
 const app = express();
@@ -111,12 +111,8 @@ app.post('/api/book-session', async (req, res) => {
     }
 });
 
-
-// --- REMOVED old /api/book endpoint ---
-
-
-// Start the server
+// Start the server directly
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`Open http://localhost:${PORT} in your browser`);
+  // console.log(`Open http://localhost:${PORT} in your browser`); // Optional
 });

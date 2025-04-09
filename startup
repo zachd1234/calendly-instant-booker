@@ -7,8 +7,8 @@ curl -X POST http://localhost:3000/api/start-session \
     curl -X POST http://localhost:3000/api/book-session \
          -H "Content-Type: application/json" \
          -d '{
-               "sessionId": "a9974283-3cb8-4590-9d1f-ac768372e076",
-               "fullBookingUrl": "https://calendly.com/zachderhake/30min/2025-05-01T16:30:00-07:00?back=1&month=2025-05&date=2025-05-01",
+               "sessionId": "ec5ce4cc-9b7b-4519-8ac3-8d9e2ac10f2a",
+               "fullBookingUrl": "https://calendly.com/zachderhake/30min/2025-04-11T10:30:00-07:00?back=1&month=2025-04&date=2025-04-11",
                "name": "Calc Nav Test",
                "email": "calcnav@gmail.com",
                "phone": "7778889999"
