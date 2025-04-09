@@ -72,41 +72,47 @@ app.post('/api/start-session', async (req, res) => {
 // --- Endpoint for Booking using a Session ---
 app.post('/api/book-session', async (req, res) => {
     console.log(`Received /api/book-session request for Session ID: ${req.body.sessionId}`);
+    const logs = []; // Create a log collector for this request
+    const logCapture = (message) => {
+      console.log(message); // Keep console logging for server visibility
+      logs.push(message);
+    };
+
     try {
         const { sessionId, fullBookingUrl, name, email, phone } = req.body;
 
         if (!sessionId || !fullBookingUrl || !name || !email || !phone) {
-            console.error('ERROR: Missing required fields for book-session.');
+            logCapture('ERROR: Missing required fields for book-session.'); // Use logCapture
             return res.status(400).json({
                 success: false,
-                message: 'Missing required fields: sessionId, fullBookingUrl, name, email, phone.'
-                // No logs array here unless we create one
+                message: 'Missing required fields: sessionId, fullBookingUrl, name, email, phone.',
+                logs: logs // Include collected logs even in error response
             });
         }
 
-        // Call bookSession from isp_dom_index.js
-        const result = await bookSession(sessionId, fullBookingUrl, name, email, phone);
+        // Pass the logCapture function to bookSession
+        const result = await bookSession(sessionId, fullBookingUrl, name, email, phone, logCapture);
 
-        // We don't have the session's logs array here easily,
-        // unless bookSession returns it. For now, respond based on success/error.
+        // We now have the logs collected in the `logs` array.
+        // Include these logs in the response.
         if (result.success) {
-             console.log(`[${sessionId}] API reports booking successful in ${result.duration}s.`);
-             // Respond with the detailed result from bookSession
-             res.json(result);
+             logCapture(`[${sessionId}] API reports booking successful in ${result.duration}s.`);
+             res.json({ ...result, logs: logs }); // Add logs to successful response
         } else {
-             console.error(`[${sessionId}] API reports booking failed. Error: ${result.error}. Duration: ${result.duration}s.`);
-             // Respond with the detailed result from bookSession, likely indicating failure
-             res.status(500).json(result);
+             logCapture(`[${sessionId}] API reports booking failed. Error: ${result.error}. Duration: ${result.duration}s.`);
+             res.status(500).json({ ...result, logs: logs }); // Add logs to failure response
         }
 
     } catch (error) {
         // Catch totally unexpected errors in this endpoint handler
         const errorMessage = `Unexpected server error during session booking: ${error.message || error}`;
-        console.error(`FATAL ERROR in /api/book-session for session ${req.body.sessionId}:`, error);
+        logCapture(`FATAL ERROR in /api/book-session for session ${req.body.sessionId}: ${errorMessage}`); // Use logCapture
+        console.error(`FATAL ERROR in /api/book-session for session ${req.body.sessionId}:`, error); // Keep console.error for critical issues
         res.status(500).json({
              success: false,
              message: 'An unexpected server error occurred during session booking.',
-             sessionId: req.body.sessionId // Include session ID if possible
+             sessionId: req.body.sessionId, // Include session ID if possible
+             logs: logs // Include logs even in fatal error response
             });
     }
 });

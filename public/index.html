@@ -108,7 +108,7 @@
             font-size: 14px;
             line-height: 1.4;
         }
-        .loading {
+        .loading, .preload-loading {
             display: none;
             text-align: center;
             margin: 20px 0;
@@ -126,112 +126,246 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-        .error {
+        .error, .preload-error {
             background-color: #fdedee;
             color: #e74c3c;
             padding: 15px;
             border-radius: 4px;
             margin-bottom: 20px;
             border-left: 4px solid #e74c3c;
+            display: none; /* Hidden by default */
+        }
+        .intro-text {
+            font-size: 18px;
+            margin-bottom: 20px;
+            color: #2c3e50;
+            line-height: 1.6;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Calendly Auto Booker</h1>
-        
-        <div id="error" class="error" style="display: none;"></div>
-        
-        <form id="booking-form">
-            <div class="form-group">
-                <label for="calendly-url">Calendly URL:</label>
-                <input type="url" id="calendly-url" name="calendlyUrl" required 
-                       placeholder="https://calendly.com/username/30min/2023-04-21T10:00:00-07:00">
+
+        <!-- Preload Section (Now visible by default after modal dismissal) -->
+        <div id="preload-section">
+            <p class="intro-text">Situation: Julian just started a call with a prospect and will soon attempt to book a meeting. Behind the scenes, you can preload the client's Calendly page below.</p>
+            <div id="preload-error" class="preload-error"></div>
+            <form id="preload-form">
+                <div class="form-group">
+                    <label for="preload-calendly-url">What Page Will Julian Book On?</label>
+                    <input type="url" id="preload-calendly-url" name="baseUrl" required
+                           placeholder="e.g., https://calendly.com/username/30min">
+                </div>
+                <button type="submit" id="preload-btn">Preload Session</button>
+            </form>
+            <div class="preload-loading" id="preload-loading">
+                <div class="spinner"></div>
+                <p>Initializing session and preloading Calendly page...
+                    A warm browser and IP are being set up behind the scenes.</p>
             </div>
-            
-            <div class="form-group">
-                <label for="name">Name:</label>
-                <input type="text" id="name" name="name" required placeholder="John Doe">
+            <div class="logs" id="preload-logs" style="display: none; margin-top: 20px;">
+                 <!-- Preload Logs will be inserted here -->
             </div>
-            
-            <div class="form-group">
-                <label for="email">Email:</label>
-                <input type="email" id="email" name="email" required placeholder="john@example.com">
-            </div>
-            
-            <div class="form-group">
-                <label for="phone">Phone Number:</label>
-                <input type="tel" id="phone" name="phone" required placeholder="+1 3109122380">
-            </div>
-            
-            <button type="submit" id="submit-btn">Book Appointment</button>
-        </form>
-        
-        <div class="loading" id="loading">
-            <div class="spinner"></div>
-            <p>Booking appointment... This may take a minute longer than expected because Render instance needs to spin up.</p>
         </div>
-        
-        <div class="results" id="results" style="display: none;">
-            <h2>Booking Results</h2>
-            
-            <div class="metrics" id="metrics">
-                <!-- Metrics will be inserted here -->
+
+        <!-- Booking Section (Initially Hidden) -->
+        <div id="booking-section" style="display: none;">
+             <p>Julian and the prospect have decided on a meeting time. It is time to book.</p>
+
+            <div id="error" class="error"></div>
+
+            <form id="booking-form">
+                <div class="form-group">
+                    <label for="calendly-url">Specific Calendly Booking URL:</label>
+                    <input type="url" id="calendly-url" name="fullBookingUrl" required
+                           placeholder="https://calendly.com/username/30min/YYYY-MM-DDTHH:mm:ss...">
+                </div>
+
+                <div class="form-group">
+                    <label for="name">Name:</label>
+                    <input type="text" id="name" name="name" required placeholder="John Doe">
+                </div>
+
+                <div class="form-group">
+                    <label for="email">Email:</label>
+                    <input type="email" id="email" name="email" required placeholder="john@example.com">
+                </div>
+
+                <div class="form-group">
+                    <label for="phone">Phone Number:</label>
+                    <input type="tel" id="phone" name="phone" required placeholder="+1 3109122380">
+                </div>
+
+                <button type="submit" id="submit-btn"> Book Appointment</button>
+            </form>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Booking appointment... This may take a minute longer than expected because Render instance needs to spin up.</p>
             </div>
-            
-            <h3>Booking Logs:</h3>
-            <div class="logs" id="logs">
-                <!-- Logs will be inserted here -->
+
+            <div class="results" id="results" style="display: none;">
+                <h2>Booking Results</h2>
+
+                <div class="metrics" id="metrics">
+                    <!-- Metrics will be inserted here -->
+                </div>
+
+                <h3>Booking Logs:</h3>
+                <div class="logs" id="logs">
+                    <!-- Logs will be inserted here -->
+                </div>
             </div>
         </div>
     </div>
-    
+
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            const form = document.getElementById('booking-form');
+            // Global variable to store the session ID
+            let currentSessionId = null;
+
+            // --- Element References ---
+            // Preload elements
+            const preloadSection = document.getElementById('preload-section');
+            const preloadForm = document.getElementById('preload-form');
+            const preloadUrlInput = document.getElementById('preload-calendly-url');
+            const preloadBtn = document.getElementById('preload-btn');
+            const preloadLoading = document.getElementById('preload-loading');
+            const preloadError = document.getElementById('preload-error');
+            const preloadLogs = document.getElementById('preload-logs'); // Added for preload logs
+
+            // Booking elements
+            const bookingSection = document.getElementById('booking-section');
+            const bookingForm = document.getElementById('booking-form');
             const submitBtn = document.getElementById('submit-btn');
             const loading = document.getElementById('loading');
             const results = document.getElementById('results');
             const metrics = document.getElementById('metrics');
-            const logs = document.getElementById('logs');
-            const error = document.getElementById('error');
-            
-            form.addEventListener('submit', async function(e) {
+            const logs = document.getElementById('logs'); // Booking logs
+            const error = document.getElementById('error'); // Booking error
+
+            // --- Utility Function to Display Logs ---
+            function displayLogs(logContainer, logMessages) {
+                 if (logMessages && logMessages.length) {
+                     logContainer.innerHTML = logMessages.map(log => `<div>${log}</div>`).join('');
+                     logContainer.style.display = 'block'; // Show the log container
+                 } else {
+                     logContainer.innerHTML = '<div>No logs available for this step.</div>';
+                     logContainer.style.display = 'block'; // Still show container, but with message
+                 }
+            }
+
+            // --- Preload Form Submission Handler ---
+            preloadForm.addEventListener('submit', async function(e) {
                 e.preventDefault();
-                
-                // Clear previous results
+
+                // Clear previous preload errors/logs and hide results
+                preloadError.style.display = 'none';
+                preloadError.textContent = '';
+                preloadLogs.style.display = 'none'; // Hide logs initially
+                preloadLogs.innerHTML = '';
+                bookingSection.style.display = 'none'; // Ensure booking section is hidden
+                results.style.display = 'none'; // Hide previous booking results if any
+
+                // Disable button and show loading
+                preloadBtn.disabled = true;
+                preloadLoading.style.display = 'block';
+
+                const baseUrl = preloadUrlInput.value.trim();
+
+                try {
+                    const response = await fetch('/api/start-session', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ baseUrl: baseUrl })
+                    });
+
+                    const data = await response.json();
+
+                    // Display preload logs regardless of success/failure
+                    displayLogs(preloadLogs, data.logs);
+
+                    if (response.ok && data.success) {
+                        currentSessionId = data.sessionId; // Store the session ID
+                        console.log(`Session started: ${currentSessionId}`);
+
+                        // Hide preload section, show booking section
+                        preloadSection.style.display = 'none';
+                        bookingSection.style.display = 'block';
+                        // Clear any previous booking errors/results when showing the section
+                        error.style.display = 'none';
+                        results.style.display = 'none';
+
+                    } else {
+                        // Show error in the preload section
+                        preloadError.textContent = data.message || 'Failed to start session.';
+                        preloadError.style.display = 'block';
+                        // Ensure booking section remains hidden on preload failure
+                        bookingSection.style.display = 'none';
+                    }
+
+                } catch (err) {
+                    console.error('Preload Error:', err);
+                    preloadError.textContent = 'Failed to connect to the server for preloading. Please try again.';
+                    preloadError.style.display = 'block';
+                     displayLogs(preloadLogs, [`CLIENT-SIDE ERROR: ${err.message || err}`]); // Show client error in logs
+                     bookingSection.style.display = 'none'; // Ensure booking section remains hidden
+                } finally {
+                    // Hide loading and re-enable button
+                    preloadLoading.style.display = 'none';
+                    preloadBtn.disabled = false;
+                }
+            });
+
+
+            // --- Booking Form Submission Handler ---
+            bookingForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
+
+                if (!currentSessionId) {
+                     error.textContent = 'Error: No active session found. Please reload and start a session first.';
+                     error.style.display = 'block';
+                     return;
+                }
+
+                // Clear previous booking results/errors
                 error.style.display = 'none';
                 error.textContent = '';
                 results.style.display = 'none';
                 metrics.innerHTML = '';
-                logs.innerHTML = '';
-                
+                logs.innerHTML = ''; // Clear booking logs
+
                 // Disable submit button and show loading
                 submitBtn.disabled = true;
                 loading.style.display = 'block';
-                
+
                 // Get form data
                 const formData = {
-                    calendlyUrl: document.getElementById('calendly-url').value.trim(),
+                    sessionId: currentSessionId, // Use the stored session ID
+                    fullBookingUrl: document.getElementById('calendly-url').value.trim(),
                     name: document.getElementById('name').value.trim(),
                     email: document.getElementById('email').value.trim(),
                     phone: document.getElementById('phone').value.trim()
                 };
-                
+
                 try {
-                    // Make API request
-                    const response = await fetch('/api/book', {
+                    // Make API request to the new endpoint
+                    const response = await fetch('/api/book-session', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify(formData)
                     });
-                    
+
                     const data = await response.json();
-                    
-                    if (response.ok) {
-                        // Display metrics
+
+                     // Display booking logs (returned from book-session)
+                     displayLogs(logs, data.logs); // Use the booking logs container
+
+                    if (response.ok && data.success) {
+                        // Display metrics (assuming structure is similar)
                         metrics.innerHTML = `
                             <div class="metric">
                                 <div class="metric-label">Total Time</div>
@@ -239,42 +373,36 @@
                             </div>
                             <div class="metric">
                                 <div class="metric-label">Browser Setup</div>
-                                <div class="metric-value">${data.browserTime}s</div>
+                                <div class="metric-value">${(data.metrics?.browserTime || 'N/A')}s</div>
                             </div>
                             <div class="metric">
                                 <div class="metric-label">Navigation</div>
-                                <div class="metric-value">${data.navigationTime}s</div>
+                                <div class="metric-value">${(data.metrics?.navigationTime || 'N/A')}s</div>
                             </div>
                             <div class="metric">
                                 <div class="metric-label">Form Filling</div>
-                                <div class="metric-value">${data.formTime}s</div>
+                                <div class="metric-value">${(data.metrics?.formTime || 'N/A')}s</div>
                             </div>
                         `;
-                        
-                        // Display logs
-                        if (data.logs && data.logs.length) {
-                            logs.innerHTML = data.logs.map(log => `<div>${log}</div>`).join('');
-                        } else {
-                            logs.innerHTML = '<div>No logs available</div>';
-                        }
-                        
-                        // Show results
+                         // Note: Adjusted metric access based on potential structure returned by bookSession
+
+                        // Show results section
                         results.style.display = 'block';
                     } else {
-                        // Show error
+                        // Show error in the booking section
                         error.textContent = data.message || 'An error occurred while booking the appointment.';
                         error.style.display = 'block';
-                        
-                        // Display error logs if available
+                        // Logs are already displayed above, but ensure results container is visible if logs exist
                         if (data.logs && data.logs.length) {
-                            logs.innerHTML = data.logs.map(log => `<div>${log}</div>`).join('');
-                            results.style.display = 'block';
+                            results.style.display = 'block'; // Keep results visible to show logs
                         }
                     }
                 } catch (err) {
-                    console.error('Error:', err);
-                    error.textContent = 'Failed to connect to the server. Please try again.';
+                    console.error('Booking Error:', err);
+                    error.textContent = 'Failed to connect to the server for booking. Please try again.';
                     error.style.display = 'block';
+                     displayLogs(logs, [`CLIENT-SIDE ERROR: ${err.message || err}`]); // Show client error in booking logs
+                     results.style.display = 'block'; // Keep results visible to show logs
                 } finally {
                     // Hide loading and re-enable submit button
                     loading.style.display = 'none';

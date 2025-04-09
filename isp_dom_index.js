@@ -36,9 +36,10 @@ function parseCalendlyUrl(url) {
 }
 
 // --- Step 2: Book Session Function (DOM Navigation - Calculated Month Clicks) ---
-async function bookSession(sessionId, fullBookingUrl, name, email, phone) {
-    const session = activeSessions[sessionId];
-    const logCapture = session?.logCapture || console.log;
+async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCapture) {
+    const session = activeSessions[sessionId]; // Re-enable this line to get the session object
+    // Remove the internal logCapture definition, use the passed-in one.
+    // const logCapture = session?.logCapture || console.log;
 
     logCapture(`[${sessionId}] Received request to book session (DOM Navigation - Calculated).`);
     logCapture(`[${sessionId}] Target URL: ${fullBookingUrl}`);
@@ -133,17 +134,33 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone) {
         logCapture(`[${sessionId}] Selecting day: ${targetDate.day}`);
         const targetJsDate = new Date(targetDate.year, targetDate.month, targetDate.day);
         const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-        // Revert to using aria-label selector
-        const daySelector = `button[aria-label*="${monthNames[targetDate.month]} ${targetDate.day}"][aria-label*="Times available"]`;
+        // Simpler selector to find the button *just* by date, not availability yet
+        const dayButtonSelector = `button[aria-label*="${monthNames[targetDate.month]} ${targetDate.day}"]`;
         try {
-            await page.waitForSelector(daySelector, { timeout: 12000, state: 'visible' }); // Keep increased timeout
-            await page.click(daySelector);
+            // Wait for the button corresponding to the date to exist
+            const dayButton = await page.waitForSelector(dayButtonSelector, { timeout: 12000, state: 'attached' }); // Find attached, not necessarily visible/enabled
+
+            // Now check if it's disabled
+            const isDisabled = await dayButton.isDisabled();
+            if (isDisabled) {
+                logCapture(`[${sessionId}] ❌ ERROR: Day ${targetDate.day} (${monthNames[targetDate.month]}) button found but is disabled (unavailable). Selector: "${dayButtonSelector}"`);
+                throw new Error(`Day ${targetDate.day} (${monthNames[targetDate.month]}) is unavailable.`);
+            }
+
+            // If not disabled, proceed to click
+            logCapture(`[${sessionId}] Day ${targetDate.day} button found and is enabled. Clicking...`);
+            await dayButton.click(); // Click the located button element
             logCapture(`[${sessionId}] Clicked day ${targetDate.day}.`);
             await page.waitForTimeout(500);
         } catch (e) {
-            logCapture(`[${sessionId}] ❌ ERROR clicking day ${targetDate.day} using selector "${daySelector}": ${e.message}`);
-            await page.screenshot({ path: `session_day_click_error_${sessionId}.png` }).catch(err => logCapture(`[${sessionId}] ERROR: Day click error screenshot failed: ${err.message}`));
-            throw new Error(`Failed to click day ${targetDate.day}. It might be unavailable or the selector '${daySelector}' is wrong.`);
+            // Catch errors from waitForSelector or the isDisabled check/click
+            logCapture(`[${sessionId}] ❌ ERROR selecting day ${targetDate.day}: ${e.message}`);
+            // Keep screenshot on error
+            if (page && !page.isClosed()) { // Check if page exists and is open before screenshot
+                 await page.screenshot({ path: `session_day_click_error_${sessionId}.png` }).catch(err => logCapture(`[${sessionId}] ERROR: Day click error screenshot failed: ${err.message}`));
+            }
+            // Re-throw a more generic error if the initial find failed, or propagate the specific 'disabled' error
+            throw new Error(`Failed to find or click day ${targetDate.day}. Original error: ${e.message}`);
         }
 
         // 5. Select Time
