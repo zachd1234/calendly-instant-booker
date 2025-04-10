@@ -50,7 +50,7 @@ async function startSession(baseUrl, logCapture = console.log) {
         // 1. Launch Browser with improved settings to reduce fingerprinting
         logCapture(`[${sessionId}] Launching new browser with rotating proxy and improved anti-fingerprinting...`);
         browser = await chromium.launch({
-            headless: false, // TEMPORARY: Set to false for debugging the calendar loading issue
+            headless: true, // TEMPORARY: Set to false for debugging the calendar loading issue
             proxy: proxySettings,
             args: [
                 '--disable-blink-features=AutomationControlled',
