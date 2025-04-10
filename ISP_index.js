@@ -24,7 +24,7 @@ const { devices } = require('playwright');
  * @param {Function} logCapture - Logging function
  */
 async function standardizeBrowserProfile(page, sessionId, logCapture) {
-    logCapture(`[${sessionId}] Standardizing browser profile to bypass geographic restrictions...`);
+    logCapture(`[${sessionId}] Standardizing browser profile to always appear as from Los Angeles (LA)...`);
     
     try {
         // 1. Use a consistent user agent (Chrome on Mac - widely accepted)
@@ -35,10 +35,13 @@ async function standardizeBrowserProfile(page, sessionId, logCapture) {
         
         // Use context.setExtraHTTPHeaders instead of page.setUserAgent
         await context.setExtraHTTPHeaders({
-            'User-Agent': standardUserAgent
+            'User-Agent': standardUserAgent,
+            // Adding common headers for LA location
+            'X-Forwarded-For': '128.97.27.37', // UCLA IP address (Los Angeles)
+            'Accept-Language': 'en-US,en;q=0.9'
         });
         
-        logCapture(`[${sessionId}] Set User-Agent via HTTP headers: ${standardUserAgent}`);
+        logCapture(`[${sessionId}] Set User-Agent and location headers`);
         
         // 2. Set standard viewport dimensions
         await page.setViewportSize({ width: 1280, height: 800 });
@@ -76,13 +79,61 @@ async function standardizeBrowserProfile(page, sessionId, logCapture) {
             });
         }, standardUserAgent);
         
-        // 6. Log the standardized profile
+        // 6. Add comprehensive LA location overrides
+        await page.evaluate(() => {
+            // Override geolocation API to return LA coordinates
+            const fakeGeolocation = {
+                latitude: 34.052235,  // LA coordinates
+                longitude: -118.243683,
+                accuracy: 100
+            };
+            
+            // Mock the geolocation API
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition = function(success) {
+                    success({ 
+                        coords: fakeGeolocation,
+                        timestamp: Date.now()
+                    });
+                };
+            }
+            
+            // Override any IP detection APIs (for basic JS checks)
+            if (!window._la_location_applied) {
+                window._la_location_data = {
+                    city: "Los Angeles",
+                    region: "California", 
+                    country: "US",
+                    loc: "34.052235,-118.243683",
+                    postal: "90012",
+                    timezone: "America/Los_Angeles"
+                };
+                
+                // Flag to prevent re-application
+                window._la_location_applied = true;
+            }
+            
+            // Override any Date methods to ensure LA timezone
+            const originalDate = Date;
+            Date = function(...args) {
+                const date = new originalDate(...args);
+                const hackedDate = new originalDate(date.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+                return hackedDate;
+            };
+            Date.prototype = originalDate.prototype;
+            Date.now = originalDate.now;
+            Date.parse = originalDate.parse;
+            Date.UTC = originalDate.UTC;
+        });
+        
+        // 7. Log the standardized profile
         const currentUserAgent = await page.evaluate(() => navigator.userAgent);
         logCapture(`[${sessionId}] Browser profile standardized to:`);
         logCapture(`[${sessionId}] - User-Agent: ${currentUserAgent}`);
         logCapture(`[${sessionId}] - Viewport: 1280x800`);
         logCapture(`[${sessionId}] - Timezone: America/Los_Angeles (LA)`);
         logCapture(`[${sessionId}] - Language: en-US`);
+        logCapture(`[${sessionId}] - Geolocation: Los Angeles coordinates (34.052235, -118.243683)`);
         
         return true;
     } catch (error) {
@@ -197,71 +248,64 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
         
         // If all navigation attempts failed, perform diagnostics and throw error
         if (!navigationSucceeded) {
-            logCapture(`[${sessionId}] All ${maxRetries} navigation attempts failed. Performing diagnostics...`);
+            logCapture(`[${sessionId}] All ${maxRetries} navigation attempts failed. Performing one final attempt with enhanced LA profile...`);
             
-            // Check location information to provide better error context
+            // Final attempt to re-standardize browser profile 
             try {
-                await page.goto('https://ipinfo.io/json', { waitUntil: 'domcontentloaded', timeout: 10000 });
-                const locationData = await page.evaluate(() => {
-                    try {
-                        return JSON.parse(document.querySelector('pre').textContent);
-                    } catch (e) {
-                        return { error: e.message };
-                    }
+                // Re-apply the standardization with a longer wait time after
+                await standardizeBrowserProfile(page, sessionId, logCapture);
+                await page.waitForTimeout(2000); // Longer wait to ensure settings take effect
+                
+                // Make one final attempt with increased timeout
+                logCapture(`[${sessionId}] Making final navigation attempt with enhanced LA profile...`);
+                await page.goto(fullBookingUrl, {
+                    waitUntil: 'networkidle', // Most thorough strategy
+                    timeout: 60000 // Full minute timeout
                 });
                 
-                if (locationData && locationData.city) {
-                    const isSanFrancisco = locationData.city === 'San Francisco' || 
-                        (locationData.region === 'California' && locationData.loc?.startsWith('37.7'));
-                    
-                    logCapture(`[${sessionId}] Location detected: ${locationData.city}, ${locationData.region}`);
-                    logCapture(`[${sessionId}] IP: ${locationData.ip}, ISP: ${locationData.org || 'Unknown'}`);
-                    
-                    if (isSanFrancisco) {
-                        throw new Error(`Navigation failed due to San Francisco IP restrictions. Calendly appears to be timing out requests from this region. Try using LA VPN. Last error: ${lastError.message}`);
-                    }
-                }
-            } catch (diagError) {
-                if (diagError.message.includes('San Francisco IP restrictions')) {
-                    throw diagError; // Re-throw the specific error
-                }
-                logCapture(`[${sessionId}] Error during location diagnostics: ${diagError.message}`);
+                // If we get here, the final attempt succeeded
+                navigationSucceeded = true;
+                logCapture(`[${sessionId}] ✅ Final navigation attempt succeeded!`);
+                navigationTime = (Date.now() - navigationStartTime) / 1000;
+            } catch (finalError) {
+                logCapture(`[${sessionId}] ❌ Final navigation attempt also failed: ${finalError.message}`);
+                
+                // Throw a generic navigation error - no location checking
+                throw new Error(`All navigation attempts failed. Try using a different connection or time. Last error: ${finalError.message}`);
             }
-            
-            // If we get here, throw the generic error
-            throw new Error(`All ${maxRetries} navigation attempts failed. Last error: ${lastError.message}`);
         }
         
-        navigationTime = (Date.now() - navigationStartTime) / 1000;
-        logCapture(`[${sessionId}] Page navigation completed in ${navigationTime.toFixed(2)}s`);
-        const pageTitle = await page.title().catch((err) => {
-             logCapture(`[${sessionId}] WARN: Failed to get page title after navigation: ${err.message}`);
-             return 'Error getting title';
-        });
-        logCapture(`[${sessionId}] Page title after navigation: ${pageTitle}`);
+        // Only proceed with the rest of the function if navigation succeeded
+        if (navigationSucceeded) {
+            navigationTime = (Date.now() - navigationStartTime) / 1000;
+            logCapture(`[${sessionId}] Page navigation completed in ${navigationTime.toFixed(2)}s`);
+            const pageTitle = await page.title().catch((err) => {
+                logCapture(`[${sessionId}] WARN: Failed to get page title after navigation: ${err.message}`);
+                return 'Error getting title';
+            });
+            logCapture(`[${sessionId}] Page title after navigation: ${pageTitle}`);
 
-        // 3. Hand off to Booking Service
-        logCapture(`[${sessionId}] Preparing to hand off to bookingService...`);
-        const bookingStartTime = Date.now();
-        bookingServiceResult = await bookMeeting(page, name, email, phone);
-        bookingServiceDuration = (Date.now() - bookingStartTime) / 1000;
-        logCapture(`[${sessionId}] bookingService call completed in ${bookingServiceDuration.toFixed(2)}s.`);
+            // 3. Hand off to Booking Service
+            logCapture(`[${sessionId}] Preparing to hand off to bookingService...`);
+            const bookingStartTime = Date.now();
+            bookingServiceResult = await bookMeeting(page, name, email, phone);
+            bookingServiceDuration = (Date.now() - bookingStartTime) / 1000;
+            logCapture(`[${sessionId}] bookingService call completed in ${bookingServiceDuration.toFixed(2)}s.`);
 
-        // 4. Log Result from bookingService
-        if (bookingServiceResult && bookingServiceResult.success) { // Check if result object exists
-          logCapture(`[${sessionId}] ✅ bookingService reported SUCCESS.`);
-          stepSuccess = true;
-        } else {
-          // Log the failure reason more clearly
-          const serviceError = bookingServiceResult?.error || "Unknown booking service error";
-          logCapture(`[${sessionId}] ❌ bookingService reported FAILURE. Reason: ${serviceError}`);
-          // Log the full result object on failure for debugging (optional)
-          // logCapture(`[${sessionId}] Full bookingServiceResult on failure: ${JSON.stringify(bookingServiceResult)}`);
-          if (page && !page.isClosed()) { // Check page before screenshot
-            logCapture(`[${sessionId}] Attempting screenshot on booking failure: session_book_failure_${sessionId}.png`);
-            await page.screenshot({ path: `session_book_failure_${sessionId}.png` }).catch(e => logCapture(`[${sessionId}] ERROR: Failure screenshot failed: ${e.message}`));
-          }
-          stepSuccess = false;
+            // 4. Log Result from bookingService
+            if (bookingServiceResult && bookingServiceResult.success) { // Check if result object exists
+              logCapture(`[${sessionId}] ✅ bookingService reported SUCCESS.`);
+              stepSuccess = true;
+            } else {
+              // Log the failure reason more clearly
+              const serviceError = bookingServiceResult?.error || "Unknown booking service error";
+              logCapture(`[${sessionId}] ❌ bookingService reported FAILURE. Reason: ${serviceError}`);
+              if (page && !page.isClosed()) { // Check page before screenshot
+                logCapture(`[${sessionId}] Attempting screenshot on booking failure: session_book_failure_${sessionId}.png`);
+                await page.screenshot({ path: `session_book_failure_${sessionId}.png` }).catch(e => logCapture(`[${sessionId}] ERROR: Failure screenshot failed: ${e.message}`));
+              }
+              stepSuccess = false;
+            }
         }
 
       } catch (error) {
@@ -291,40 +335,41 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
             } else {
                  logCapture(`[${sessionId}] WARN: Browser object was missing or invalid during cleanup.`);
             }
-        } catch (closeError) {
-            logCapture(`[${sessionId}] ❌ ERROR during browser close: ${closeError.message}`);
-        } finally {
+
             // Always remove from active sessions map
             if (activeSessions[sessionId]) {
-                 logCapture(`[${sessionId}] Removing session from active map.`);
-                 delete activeSessions[sessionId];
-                 logCapture(`[${sessionId}] Session removed from active map.`);
+                logCapture(`[${sessionId}] Removing session from active map.`);
+                delete activeSessions[sessionId];
+                logCapture(`[${sessionId}] Session removed from active map.`);
             } else {
                 logCapture(`[${sessionId}] Session already removed from active map or never added correctly.`);
             }
+        } catch (closeError) {
+            logCapture(`[${sessionId}] ❌ ERROR during browser close: ${closeError.message}`);
+        } finally {
+            logCapture(`[${sessionId}] Finished finally block.`);
         }
-        logCapture(`[${sessionId}] Finished finally block.`);
+
+        // 6. Final Logging and Return
+        const overallDuration = (Date.now() - overallStartTime) / 1000;
+        logCapture(`[${sessionId}] bookSession (ISP_index.js) finished. Overall duration: ${overallDuration.toFixed(2)}s. Final Result: ${stepSuccess ? 'Success' : 'Failure'}`);
+
+        // Restructure the return object to match frontend expectations
+        return {
+            success: stepSuccess,
+            sessionId: sessionId,
+            duration: parseFloat(overallDuration.toFixed(2)), // Overall total time
+            // Add the nested metrics object
+            metrics: {
+                browserTime: undefined, // This isn't calculated in bookSession, set to undefined or null
+                navigationTime: parseFloat(navigationTime.toFixed(2)), // Use the calculated navigation time
+                formTime: parseFloat(bookingServiceDuration.toFixed(2)) // Map bookingServiceDuration to formTime
+            },
+            error: stepSuccess ? undefined : (bookingServiceResult?.error || "Booking step failed in ISP_index"),
+            // Keep logs at the top level as server.js expects it there to merge
+            // logs: logCapture.getLogs ? logCapture.getLogs() : [] // Only if logCapture had a method to retrieve logs
+        };
     }
-
-    // 6. Final Logging and Return
-    const overallDuration = (Date.now() - overallStartTime) / 1000;
-    logCapture(`[${sessionId}] bookSession (ISP_index.js) finished. Overall duration: ${overallDuration.toFixed(2)}s. Final Result: ${stepSuccess ? 'Success' : 'Failure'}`);
-
-    // Restructure the return object to match frontend expectations
-    return {
-        success: stepSuccess,
-        sessionId: sessionId,
-        duration: parseFloat(overallDuration.toFixed(2)), // Overall total time
-        // Add the nested metrics object
-        metrics: {
-            browserTime: undefined, // This isn't calculated in bookSession, set to undefined or null
-            navigationTime: parseFloat(navigationTime.toFixed(2)), // Use the calculated navigation time
-            formTime: parseFloat(bookingServiceDuration.toFixed(2)) // Map bookingServiceDuration to formTime
-        },
-        error: stepSuccess ? undefined : (bookingServiceResult?.error || "Booking step failed in ISP_index"),
-        // Keep logs at the top level as server.js expects it there to merge
-        // logs: logCapture.getLogs ? logCapture.getLogs() : [] // Only if logCapture had a method to retrieve logs
-    };
 }
 
 // Export only the booking function for the two-step process

@@ -48,14 +48,28 @@ async function standardizeBrowserProfile(page, sessionId, logCapture) {
         });
         
         // 4. Set standard language
-        await page.evaluate(() => {
-            Object.defineProperty(navigator, 'language', {
-                get: function() { return 'en-US'; }
+        try {
+            await page.evaluate(() => {
+                try {
+                    Object.defineProperty(navigator, 'language', {
+                        get: function() { return 'en-US'; }
+                    });
+                } catch (propError) {
+                    // If property can't be redefined, log but continue
+                    console.log('Warning: Could not override navigator.language');
+                }
+                
+                try {
+                    Object.defineProperty(navigator, 'languages', {
+                        get: function() { return ['en-US', 'en']; }
+                    });
+                } catch (propError) {
+                    console.log('Warning: Could not override navigator.languages');
+                }
             });
-            Object.defineProperty(navigator, 'languages', {
-                get: function() { return ['en-US', 'en']; }
-            });
-        });
+        } catch (evalError) {
+            logCapture(`[${sessionId}] Warning: Could not set language properties: ${evalError.message}`);
+        }
         
         // 5. Also override navigator.userAgent in the page context
         await page.evaluate((ua) => {
@@ -83,14 +97,28 @@ async function standardizeBrowserProfile(page, sessionId, logCapture) {
 function parseCalendlyUrl(url) {
     try {
         // Example: https://calendly.com/user/event/YYYY-MM-DDTHH:mm:ss-ZZ:ZZ
-        // Extract the date/time part: YYYY-MM-DDTHH:mm:ss
+        // Extract the date/time part with timezone: YYYY-MM-DDTHH:mm:ss-ZZ:ZZ
         const dateTimeString = url.split('/').pop().split('?')[0]; // Get last part, remove query params
-        const date = new Date(dateTimeString); // Use JS Date object parsing
+        
+        // Extract the timezone offset from the URL
+        let timezoneOffset = "";
+        const timezoneMatch = dateTimeString.match(/([+-]\d{2}:\d{2})$/);
+        if (timezoneMatch) {
+            timezoneOffset = timezoneMatch[1];
+            console.log(`Detected timezone offset in URL: ${timezoneOffset}`);
+        } else {
+            console.log(`No timezone offset detected in URL, using local timezone`);
+        }
+        
+        // Create a date object that correctly interprets the timezone in the URL
+        const date = new Date(dateTimeString);
 
         if (isNaN(date)) {
             throw new Error('Invalid date format in URL');
         }
 
+        // Extract date components directly from the date object
+        // (Date constructor already handles the timezone correctly)
         const year = date.getFullYear();
         const month = date.getMonth(); // 0-indexed (0 = Jan, 1 = Feb, ...)
         const day = date.getDate();
@@ -104,7 +132,15 @@ function parseCalendlyUrl(url) {
         const minutesStr = minutes < 10 ? '0' + minutes : minutes;
         const timeString = `${hours}:${minutesStr}${ampm}`; // e.g., "9:00am", "2:30pm"
 
-        return { year, month, day, timeString };
+        // For logging, display both the original time and the local display time
+        const localTimeString = date.toLocaleTimeString();
+        
+        console.log(`Parsed Calendly URL: ${url}`);
+        console.log(`Original datetime: ${dateTimeString} with offset ${timezoneOffset}`);
+        console.log(`Time for selection: ${timeString}`);
+        
+        // Include the timezone offset in the returned object for reference
+        return { year, month, day, timeString, timezoneOffset };
     } catch (e) {
         console.error(`Error parsing Calendly URL ${url}: ${e.message}`);
         return null;
@@ -148,6 +184,7 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
         // Don't close browser here, let finally block handle it
         return { success: false, error: errorMsg, duration: 0, sessionId: sessionId };
     }
+    
     logCapture(`[${sessionId}] Target parsed: Month=${targetDate.month}, Day=${targetDate.day}, Year=${targetDate.year}, Time=${targetDate.timeString}`);
 
     // *** MOVED: Robust Cookie Check happens early ***
@@ -169,38 +206,58 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
     // *** END OF MOVED COOKIE CHECK ***
 
     try {
-        // Perform location diagnostics to check for potential issues
-        try {
-            logCapture(`[${sessionId}] Checking location for potential restrictions...`);
-            await page.goto('https://ipinfo.io/json', { waitUntil: 'domcontentloaded', timeout: 10000 });
-            const locationData = await page.evaluate(() => {
-                try {
-                    return JSON.parse(document.querySelector('pre').textContent);
-                } catch (e) {
-                    return { error: e.message };
-                }
-            });
-            
-            if (locationData && locationData.city) {
-                const isSanFrancisco = locationData.city === 'San Francisco' || 
-                    (locationData.region === 'California' && locationData.loc?.startsWith('37.7'));
-                
-                logCapture(`[${sessionId}] Location detected: ${locationData.city}, ${locationData.region}, ${locationData.country}`);
-                logCapture(`[${sessionId}] IP: ${locationData.ip}, ISP: ${locationData.org || 'Unknown'}`);
-                
-                if (isSanFrancisco) {
-                    logCapture(`[${sessionId}] ⚠️ WARNING: Connected from San Francisco area which may experience Calendly timeouts`);
-                    logCapture(`[${sessionId}] Proceeding with enhanced browser standardization...`);
-                    // Re-apply standardization with extra parameters
-                    await standardizeBrowserProfile(page, sessionId, logCapture);
-                }
-            }
-        } catch (locError) {
-            logCapture(`[${sessionId}] WARN: Location check failed: ${locError.message}`);
-        }
+        // Remove the location diagnostics that navigates away from Calendly
+        logCapture(`[${sessionId}] Starting booking process on Calendly URL: ${fullBookingUrl}`);
+
+        // Take a screenshot to see what page we're actually on
+        await page.screenshot({ path: `session_before_calendar_${sessionId}.png` });
+        logCapture(`[${sessionId}] Screenshot taken before calendar interaction`);
 
         // --- DOM Navigation Steps ---
         const navigationStartTime = Date.now(); // Timer for DOM nav part
+
+        // Debug: Wait and log what elements are visible on the page
+        try {
+            logCapture(`[${sessionId}] Waiting for calendar components to load...`);
+            
+            // Wait for any calendar elements
+            const calendarGrid = await page.waitForSelector('table[role="grid"]', { timeout: 20000 }).catch(() => null);
+            const monthHeader = await page.waitForSelector('[data-section="month"] h2', { timeout: 5000 }).catch(() => null);
+            
+            if (calendarGrid) {
+                logCapture(`[${sessionId}] ✅ Calendar grid found`);
+            } else {
+                logCapture(`[${sessionId}] ❌ Calendar grid not found`);
+            }
+            
+            if (monthHeader) {
+                const monthText = await monthHeader.textContent();
+                logCapture(`[${sessionId}] ✅ Month header found: "${monthText}"`);
+            } else {
+                logCapture(`[${sessionId}] ❌ Month header not found`);
+            }
+            
+            // Take a screenshot after waiting for calendar
+            await page.screenshot({ path: `session_calendar_state_${sessionId}.png` });
+            logCapture(`[${sessionId}] Calendar state screenshot captured`);
+            
+            // Check if there are any date buttons at all
+            const dateButtons = await page.$$('button[aria-label*="day"]').catch(() => []);
+            logCapture(`[${sessionId}] Found ${dateButtons.length} date buttons on page`);
+            
+            if (dateButtons.length > 0) {
+                // Log the first few date buttons
+                const buttonLabels = [];
+                for (let i = 0; i < Math.min(5, dateButtons.length); i++) {
+                    const label = await dateButtons[i].getAttribute('aria-label').catch(() => 'unknown');
+                    buttonLabels.push(label);
+                }
+                logCapture(`[${sessionId}] Sample date buttons: ${buttonLabels.join(', ')}`);
+            }
+            
+        } catch (debugError) {
+            logCapture(`[${sessionId}] WARN: Debug element check failed: ${debugError.message}`);
+        }
 
         // 3. Calculate Month Difference and Navigate
         const now = new Date();
@@ -256,47 +313,174 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
         logCapture(`[${sessionId}] Selecting day: ${targetDate.day}`);
         const targetJsDate = new Date(targetDate.year, targetDate.month, targetDate.day);
         const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-        // Simpler selector to find the button *just* by date, not availability yet
-        const dayButtonSelector = `button[aria-label*="${monthNames[targetDate.month]} ${targetDate.day}"]`;
+        
+        // Try multiple selector strategies for the day button
+        const daySelectors = [
+            // Strategy 1: Standard specific day selector
+            `button[aria-label*="${monthNames[targetDate.month]} ${targetDate.day}"]`,
+            
+            // Strategy 2: More general day selector (any button containing the day number)
+            `button[aria-label*=" ${targetDate.day} "], button[aria-label*=" ${targetDate.day},"]`,
+            
+            // Strategy 3: By text content of the button
+            `button:has-text("${targetDate.day}")`
+        ];
+        
+        logCapture(`[${sessionId}] Trying multiple day selector strategies...`);
+        let dayButton = null;
+        let usedSelector = '';
+        
+        for (let i = 0; i < daySelectors.length; i++) {
+            try {
+                logCapture(`[${sessionId}] Trying day selector strategy ${i+1}: ${daySelectors[i]}`);
+                // First check if selector exists
+                const exists = await page.$(daySelectors[i]);
+                
+                if (exists) {
+                    logCapture(`[${sessionId}] ✅ Found day using selector strategy ${i+1}`);
+                    dayButton = await page.waitForSelector(daySelectors[i], { 
+                        timeout: 5000, 
+                        state: 'attached' 
+                    });
+                    usedSelector = daySelectors[i];
+                    break;
+                } else {
+                    logCapture(`[${sessionId}] ❌ Day not found with selector strategy ${i+1}`);
+                }
+            } catch (e) {
+                logCapture(`[${sessionId}] ❌ Error with day selector strategy ${i+1}: ${e.message}`);
+            }
+        }
+        
+        if (!dayButton) {
+            // Take a final screenshot before failing
+            await page.screenshot({ path: `session_day_not_found_${sessionId}.png` });
+            logCapture(`[${sessionId}] ❌ ERROR: Could not find day ${targetDate.day} with any selector strategy`);
+            throw new Error(`Day ${targetDate.day} not found with any selector strategy`);
+        }
+        
+        // Now check if it's disabled
         try {
-            // Wait for the button corresponding to the date to exist
-            const dayButton = await page.waitForSelector(dayButtonSelector, { timeout: 12000, state: 'attached' }); // Find attached, not necessarily visible/enabled
-
-            // Now check if it's disabled
             const isDisabled = await dayButton.isDisabled();
             if (isDisabled) {
-                logCapture(`[${sessionId}] ❌ ERROR: Day ${targetDate.day} (${monthNames[targetDate.month]}) button found but is disabled (unavailable). Selector: "${dayButtonSelector}"`);
+                logCapture(`[${sessionId}] ❌ ERROR: Day ${targetDate.day} (${monthNames[targetDate.month]}) button found but is disabled (unavailable).`);
                 throw new Error(`Day ${targetDate.day} (${monthNames[targetDate.month]}) is unavailable.`);
             }
 
             // If not disabled, proceed to click
-            logCapture(`[${sessionId}] Day ${targetDate.day} button found and is enabled. Clicking...`);
+            logCapture(`[${sessionId}] Day ${targetDate.day} button found and is enabled using selector: ${usedSelector}. Clicking...`);
             await dayButton.click(); // Click the located button element
             logCapture(`[${sessionId}] Clicked day ${targetDate.day}.`);
-            await page.waitForTimeout(500);
+            
+            // Take a screenshot after clicking day
+            await page.screenshot({ path: `session_after_day_click_${sessionId}.png` });
+            logCapture(`[${sessionId}] After day click screenshot captured`);
+            
+            await page.waitForTimeout(1000); // Longer wait after day click
         } catch (e) {
-            // Catch errors from waitForSelector or the isDisabled check/click
-            logCapture(`[${sessionId}] ❌ ERROR selecting day ${targetDate.day}: ${e.message}`);
+            // Catch errors from isDisabled check/click
+            logCapture(`[${sessionId}] ❌ ERROR with day button: ${e.message}`);
             // Keep screenshot on error
-            if (page && !page.isClosed()) { // Check if page exists and is open before screenshot
-                 await page.screenshot({ path: `session_day_click_error_${sessionId}.png` }).catch(err => logCapture(`[${sessionId}] ERROR: Day click error screenshot failed: ${err.message}`));
+            if (page && !page.isClosed()) {
+                await page.screenshot({ path: `session_day_click_error_${sessionId}.png` });
             }
-            // Re-throw a more generic error if the initial find failed, or propagate the specific 'disabled' error
-            throw new Error(`Failed to find or click day ${targetDate.day}. Original error: ${e.message}`);
+            throw new Error(`Error with day button: ${e.message}`);
         }
 
         // 5. Select Time
         logCapture(`[${sessionId}] Selecting time: ${targetDate.timeString}`);
-        const timeSelector = `button[data-container="time-button"][data-start-time="${targetDate.timeString}"]`;
+        
+        // Wait for the times to load after clicking day
         try {
-            await page.waitForSelector(timeSelector, { timeout: 10000 });
-            await page.click(timeSelector);
-            logCapture(`[${sessionId}] Clicked time ${targetDate.timeString}.`);
-            await page.waitForTimeout(500);
+            await page.waitForSelector('button[data-container="time-button"]', { timeout: 10000 });
+            logCapture(`[${sessionId}] ✅ Time buttons found`);
+            
+            // Take a screenshot of available times
+            await page.screenshot({ path: `session_time_buttons_${sessionId}.png` });
+            
+            // Log all available times for debugging
+            const timeButtons = await page.$$('button[data-container="time-button"]');
+            const availableTimes = [];
+            
+            for (const btn of timeButtons) {
+                const startTime = await btn.getAttribute('data-start-time').catch(() => null);
+                if (startTime) {
+                    availableTimes.push(startTime);
+                }
+            }
+            
+            logCapture(`[${sessionId}] Available times: ${availableTimes.join(', ')}`);
+            
+            // Check if our target time is in the available times
+            if (!availableTimes.includes(targetDate.timeString)) {
+                logCapture(`[${sessionId}] ⚠️ WARNING: Target time ${targetDate.timeString} not found in available times`);
+            }
         } catch (e) {
-            logCapture(`[${sessionId}] ❌ ERROR clicking time ${targetDate.timeString} using selector "${timeSelector}": ${e.message}`);
-            await page.screenshot({ path: `session_time_click_error_${sessionId}.png` }).catch(err => logCapture(`[${sessionId}] ERROR: Time click error screenshot failed: ${err.message}`));
-            throw new Error(`Failed to click time ${targetDate.timeString}.`);
+            logCapture(`[${sessionId}] ❌ ERROR: Failed to find any time buttons: ${e.message}`);
+            await page.screenshot({ path: `session_no_time_buttons_${sessionId}.png` });
+        }
+        
+        // Try multiple selectors for the time button
+        const timeSelectors = [
+            // Primary selector with exact data-start-time
+            `button[data-container="time-button"][data-start-time="${targetDate.timeString}"]`,
+            
+            // Alternative selector using text content
+            `button[data-container="time-button"]:has-text("${targetDate.timeString}")`,
+            
+            // Fallback to any time button if specific time not found
+            `button[data-container="time-button"]`
+        ];
+        
+        let timeButton = null;
+        let usedTimeSelector = '';
+        let usedFallbackTime = false;
+        
+        for (let i = 0; i < timeSelectors.length; i++) {
+            try {
+                logCapture(`[${sessionId}] Trying time selector strategy ${i+1}: ${timeSelectors[i]}`);
+                timeButton = await page.waitForSelector(timeSelectors[i], { timeout: 5000 });
+                
+                if (timeButton) {
+                    usedTimeSelector = timeSelectors[i];
+                    
+                    // Check if we're using the fallback (any time) selector
+                    if (i === 2) {
+                        const fallbackTime = await timeButton.getAttribute('data-start-time');
+                        logCapture(`[${sessionId}] ⚠️ Using fallback time: ${fallbackTime} instead of target: ${targetDate.timeString}`);
+                        usedFallbackTime = true;
+                    }
+                    
+                    logCapture(`[${sessionId}] ✅ Found time using selector strategy ${i+1}`);
+                    break;
+                }
+            } catch (e) {
+                logCapture(`[${sessionId}] Time selector strategy ${i+1} failed: ${e.message}`);
+            }
+        }
+        
+        if (!timeButton) {
+            await page.screenshot({ path: `session_time_not_found_${sessionId}.png` });
+            logCapture(`[${sessionId}] ❌ ERROR: Could not find time ${targetDate.timeString} with any selector strategy`);
+            throw new Error(`Time ${targetDate.timeString} not found with any selector strategy`);
+        }
+        
+        // Click the time button
+        try {
+            await timeButton.click();
+            if (usedFallbackTime) {
+                logCapture(`[${sessionId}] Clicked fallback time instead of ${targetDate.timeString}.`);
+            } else {
+                logCapture(`[${sessionId}] Clicked time ${targetDate.timeString}.`);
+            }
+            
+            // Take a screenshot after clicking time
+            await page.screenshot({ path: `session_after_time_click_${sessionId}.png` });
+            await page.waitForTimeout(1000); // Longer wait after time click
+        } catch (e) {
+            logCapture(`[${sessionId}] ❌ ERROR clicking time button: ${e.message}`);
+            await page.screenshot({ path: `session_time_click_error_${sessionId}.png` });
+            throw new Error(`Failed to click time button: ${e.message}`);
         }
 
         // 6. Click Next Button

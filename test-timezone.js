@@ -1,7 +1,8 @@
 // Test script for timezone detection and adjustment
 require('dotenv').config();
 const { startSession } = require('./sessionManager');
-const { parseCalendlyUrl } = require('./isp_dom_index');
+// Import parseCalendlyUrl directly from this file instead
+const { parseCalendlyUrl } = require('./timezoneDetection');
 
 // Simulate logging
 const logs = [];
@@ -10,16 +11,17 @@ const logCapture = (message) => {
     logs.push(message);
 };
 
-// Sample Calendly URL with a specific time
-const sampleUrl = 'https://calendly.com/example/meeting/2023-08-15T14:30:00-07:00'; // 2:30 PM Pacific Time
+// Sample Calendly URL with a specific time (for testing time parsing)
+const sampleUrl = 'https://calendly.com/zachderhake/30min/2025-04-11T12:00:00-07:00?back=1&month=2025-04&date=2025-04-11';
 
 async function testTimezoneDetection() {
     console.log('Starting timezone detection test...');
-    console.log(`Testing with sample URL: ${sampleUrl}`);
+    console.log(`Sample URL for parsing: ${sampleUrl}`);
     
     // 1. Start a session
     console.log('\n--- Starting a session ---');
-    const baseUrl = 'https://calendly.com/example/meeting';
+    // Use a real Calendly booking page (without a specific time) as base URL
+    const baseUrl = 'https://calendly.com/zachderhake/30min';
     const sessionResult = await startSession(baseUrl, logCapture);
     
     if (!sessionResult.success) {
@@ -41,6 +43,7 @@ async function testTimezoneDetection() {
         console.log('\n--- Time Parsing Comparison ---');
         
         // Parse without timezone info
+        console.log('Parsing URL:', sampleUrl);
         const withoutAdjustment = parseCalendlyUrl(sampleUrl);
         console.log('Parsed without adjustment:', withoutAdjustment);
         
@@ -48,10 +51,14 @@ async function testTimezoneDetection() {
         const withAdjustment = parseCalendlyUrl(sampleUrl, sessionResult.timezoneInfo);
         console.log('Parsed with adjustment:', withAdjustment);
         
-        if (withoutAdjustment.timeString !== withAdjustment.timeString) {
-            console.log(`✅ Timezone adjustment working: ${withoutAdjustment.timeString} → ${withAdjustment.timeString}`);
+        if (withoutAdjustment && withAdjustment) {
+            if (withoutAdjustment.timeString !== withAdjustment.timeString) {
+                console.log(`✅ Timezone adjustment working: ${withoutAdjustment.timeString} → ${withAdjustment.timeString}`);
+            } else {
+                console.log('⚠️ No difference in time after adjustment. Check if timezone detection found any difference.');
+            }
         } else {
-            console.log('⚠️ No difference in time after adjustment. Check if the timezone difference was detected correctly.');
+            console.log('❌ Error parsing URLs');
         }
     } else {
         console.log('❌ No timezone info detected in session');
@@ -59,8 +66,12 @@ async function testTimezoneDetection() {
     
     console.log('\n--- Test Complete ---');
     
-    // Force exit to clean up browser instances
-    setTimeout(() => process.exit(0), 1000);
+    // Keep the browser open for 2 minutes so you can inspect what happened
+    console.log('Browser will stay open for 120 seconds for inspection...');
+    await new Promise(resolve => setTimeout(resolve, 120000)); // 2 minutes
+    
+    console.log('Test finished, exiting');
+    process.exit(0);
 }
 
 // Run the test

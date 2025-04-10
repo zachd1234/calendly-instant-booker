@@ -50,7 +50,7 @@ async function startSession(baseUrl, logCapture = console.log) {
         // 1. Launch Browser with improved settings to reduce fingerprinting
         logCapture(`[${sessionId}] Launching new browser with rotating proxy and improved anti-fingerprinting...`);
         browser = await chromium.launch({
-            headless: true, // <-- CHANGE THIS BACK: Run headless for production/normal use
+            headless: false, // TEMPORARY: Set to false for debugging the calendar loading issue
             proxy: proxySettings,
             args: [
                 '--disable-blink-features=AutomationControlled',
@@ -63,7 +63,7 @@ async function startSession(baseUrl, logCapture = console.log) {
         });
 
         // 2. Create Context with advanced settings
-        logCapture(`[${sessionId}] Creating new context with standardized settings...`);
+        logCapture(`[${sessionId}] Creating new context with standardized LA location settings...`);
         context = await browser.newContext({
             ignoreHTTPSErrors: true,
             locale: 'en-US',
@@ -74,22 +74,66 @@ async function startSession(baseUrl, logCapture = console.log) {
             hasTouch: false,
             isMobile: false,
             javaScriptEnabled: true,
-            acceptDownloads: false
+            acceptDownloads: false,
+            extraHTTPHeaders: {
+                'Accept-Language': 'en-US,en;q=0.9',
+                'X-Forwarded-For': '128.97.27.37' // UCLA IP address (Los Angeles)
+            },
+            geolocation: {
+                latitude: 34.052235, // LA coordinates
+                longitude: -118.243683,
+                accuracy: 100
+            },
+            permissions: ['geolocation'] // Pre-grant geolocation permission
         });
         
-        // Add script to mask automation
+        // Add script to mask automation and set LA location
         await context.addInitScript(() => {
             // Override properties that reveal automation
             Object.defineProperty(navigator, 'webdriver', { get: () => false });
+            
             // Override chrome object
             if (window.chrome) {
                 window.chrome = {};
             }
+            
             // Override Permissions API
             if (navigator.permissions) {
                 navigator.permissions.query = (parameters) => 
                     Promise.resolve({ state: 'granted', onchange: null });
             }
+            
+            // Override geolocation API to return LA coordinates
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition = function(success) {
+                    success({ 
+                        coords: {
+                            latitude: 34.052235, // LA coordinates
+                            longitude: -118.243683,
+                            accuracy: 100,
+                            altitude: null,
+                            altitudeAccuracy: null,
+                            heading: null,
+                            speed: null
+                        },
+                        timestamp: Date.now()
+                    });
+                };
+            }
+            
+            // Set timezone to LA
+            Object.defineProperty(Intl, 'DateTimeFormat', {
+                writable: true,
+                configurable: true
+            });
+            const originalDateTimeFormat = Intl.DateTimeFormat;
+            Intl.DateTimeFormat = function(...args) {
+                if (args.length > 0 && args[1] && args[1].timeZone) {
+                    args[1].timeZone = 'America/Los_Angeles';
+                }
+                return new originalDateTimeFormat(...args);
+            };
+            Intl.DateTimeFormat.prototype = originalDateTimeFormat.prototype;
         });
         
         page = await context.newPage();
