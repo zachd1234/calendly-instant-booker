@@ -50,7 +50,7 @@ async function startSession(baseUrl, logCapture = console.log) {
         // 1. Launch Browser
         logCapture(`[${sessionId}] Launching new browser with rotating proxy...`);
         browser = await chromium.launch({
-            headless: true, // Set back to true
+            headless: true, // <-- CHANGE THIS BACK: Run headless for production/normal use
             proxy: proxySettings
         });
 

@@ -101,6 +101,11 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
         logCapture(`[${sessionId}] Entering finally block for cleanup...`);
         try {
             if (browser && typeof browser.close === 'function') { // Extra check for browser object and close method
+                 // Remove the 5-second delay before closing
+                 // logCapture(`[${sessionId}] Waiting 5 seconds before closing browser...`);
+                 // await new Promise(resolve => setTimeout(resolve, 5000)); // Remove delay back
+                 // Alternatively, if page object is reliably available here, could use: await page.waitForTimeout(5000);
+
                  logCapture(`[${sessionId}] Closing browser...`);
                  await browser.close();
                  logCapture(`[${sessionId}] Browser closed successfully.`);

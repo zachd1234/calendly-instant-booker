@@ -50,7 +50,8 @@ async function humanType(page, selector, text) {
 
   // Reduced typing delay
   for (const char of text) {
-    await page.keyboard.type(char, { delay: Math.floor(Math.random() * 10) + 5 });
+    // await page.keyboard.type(char, { delay: Math.floor(Math.random() * 10) + 5 });
+    await page.keyboard.type(char, { delay: 1 }); // Minimal 1ms delay
   }
 
   // Verify what was typed
@@ -344,12 +345,19 @@ async function bookMeeting(sessionId, page, name, email, phone, logCapture) {
        // Consider returning false here if submission is critical
        // return false;
     } else {
-      logCapture(`[${sessionId}] [BookingService] Submit initiated, waiting for confirmation or navigation...`);
+      logCapture(`[${sessionId}] [BookingService] Submit initiated. Waiting briefly for page transition/network idle before confirmation checks...`);
+      // *** Wait for network idle after successful click/submit ***
+      try {
+          // Replace domcontentloaded with networkidle
+          await page.waitForLoadState('networkidle', { timeout: 7000 }); // Wait up to 7s for network idle after submit
+          logCapture(`[${sessionId}] [BookingService] Network appears idle after submit.`);
+      } catch(loadStateError) {
+          logCapture(`[${sessionId}] [BookingService] WARN: Timed out waiting for network idle after submit (${loadStateError.message}). Proceeding with confirmation checks anyway...`);
+      }
     }
 
-
     // --- Confirmation Check (Revised) ---
-     logCapture(`[${sessionId}] [BookingService] Waiting for explicit confirmation or error indicators (max 30s)...`);
+     logCapture(`[${sessionId}] [BookingService] Waiting for explicit confirmation or error indicators (max 60s)...`); // Updated log based on previous change
 
     const successSelectors = [
         'div[data-container="booking-container"]',
@@ -441,8 +449,11 @@ async function bookMeeting(sessionId, page, name, email, phone, logCapture) {
                  captchaDetected = true;
                  // *** Take screenshot immediately upon CAPTCHA detection ***
                  try {
-                     logCapture(`[${sessionId}] [BookingService] Taking CAPTCHA detected screenshot...`);
-                     await page.screenshot({ path: `captcha-detected_${sessionId}.png` }).catch(e=>logCapture(`[${sessionId}] Error taking CAPTCHA screenshot: ${e.message}`));
+                    // Remove the 1-second delay before CAPTCHA screenshot
+                    // logCapture(`[${sessionId}] [BookingService] Waiting 1 second after CAPTCHA detection before screenshot...`); 
+                    // await page.waitForTimeout(1000); // Remove 1s delay back
+                    logCapture(`[${sessionId}] [BookingService] Taking CAPTCHA detected screenshot...`);
+                    await page.screenshot({ path: `captcha-detected_${sessionId}.png` }).catch(e=>logCapture(`[${sessionId}] Error taking CAPTCHA screenshot: ${e.message}`));
                  } catch (ssError) {
                     logCapture(`[${sessionId}] [BookingService] WARN: Failed to take CAPTCHA detected screenshot: ${ssError.message}`);
                  }
@@ -462,9 +473,9 @@ async function bookMeeting(sessionId, page, name, email, phone, logCapture) {
              await page.screenshot({ path: `final-state-weak-confirm-service_${sessionId}.png` }).catch(e=>logCapture(`[${sessionId}] Error taking screenshot: ${e.message}`));
              return { success: true }; // Consider it success if keywords found after timeout
          }
-        // Add a 1-second delay before the timeout screenshot for debugging
-        logCapture(`[${sessionId}] [BookingService] Waiting 1 second before timeout/captcha screenshot...`); 
-        await page.waitForTimeout(1000); 
+        // Remove the 1-second delay before the timeout screenshot
+        // logCapture(`[${sessionId}] [BookingService] Waiting 1 second before timeout/captcha screenshot...`); 
+        // await page.waitForTimeout(1000); // Remove 1s delay back
         await page.screenshot({ path: `timeout-or-captcha-screenshot_${sessionId}.png` }).catch(e=>logCapture(`[${sessionId}] Error taking screenshot: ${e.message}`)); // Renamed screenshot
         // Modify error message based on CAPTCHA detection
         const finalErrorMsg = captchaDetected 
