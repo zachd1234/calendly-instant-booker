@@ -3,6 +3,7 @@
 const { chromium } = require('playwright');
 const crypto = require('crypto');
 require('dotenv').config(); // Still needs .env vars for proxy credentials
+const { standardizeBrowserProfile, standardizeBrowserSession, removeAllRoutes } = require('./utils/browserUtils');
 
 // --- Configuration ---
 const SESSION_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
@@ -50,15 +51,26 @@ async function startSession(baseUrl, logCapture = console.log) {
         // 1. Launch Browser with improved settings to reduce fingerprinting
         logCapture(`[${sessionId}] Launching new browser with rotating proxy and improved anti-fingerprinting...`);
         browser = await chromium.launch({
-            headless: true, // TEMPORARY: Set to false for debugging the calendar loading issue
+            headless: true, // Set to true for production environments
             proxy: proxySettings,
             args: [
+                // Enhanced stealth arguments
                 '--disable-blink-features=AutomationControlled',
-                '--disable-features=IsolateOrigins,site-per-process',
+                '--disable-features=IsolateOrigins,site-per-process,SitePerProcess',
                 '--disable-site-isolation-trials',
                 '--disable-web-security',
                 '--no-sandbox',
-                '--disable-setuid-sandbox'
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--disable-gpu',
+                '--disable-infobars',
+                '--window-position=0,0',
+                '--ignore-certificate-errors',
+                '--ignore-certificate-errors-spki-list',
+                '--mute-audio'
             ]
         });
 
@@ -156,8 +168,11 @@ async function startSession(baseUrl, logCapture = console.log) {
             } else { logCapture(`[${sessionId}] No cookie button found within 3 seconds.`); }
         } catch (e) { logCapture(`[${sessionId}] WARN: Cookie consent check failed: ${e.message}`); }
 
-        // 3. Navigate Page with improved retry logic
-        logCapture(`[${sessionId}] Navigating page to base URL: ${baseUrl}`);
+        // Apply the comprehensive one-time standardization
+        await standardizeBrowserSession(browser, page, sessionId, logCapture);
+        
+        // Now navigate with the standardized profile
+        logCapture(`[${sessionId}] Navigating to Calendly URL with standardized profile: ${baseUrl}`);
         const navStartTime = Date.now();
         
         // Try with three strategies in sequence if needed
@@ -208,44 +223,39 @@ async function startSession(baseUrl, logCapture = console.log) {
 }
 
 // --- Session Cleanup Logic (Simplified: Just close the session's browser) ---
-async function cleanupIdleSessions() {
-    const now = Date.now();
-    console.log(`[SessionManager] Running cleanup check... Active: ${Object.keys(activeSessions).length}`);
-    let cleanedCount = 0;
-
-    const sessionIds = Object.keys(activeSessions);
-    for (const sessionId of sessionIds) {
-        const session = activeSessions[sessionId];
-        if (!session) continue;
-        const elapsedTime = now - session.startTime;
-
-        if (elapsedTime > SESSION_TIMEOUT_MS) {
-            cleanedCount++;
-            const { browser, logCapture } = session; // Get browser from session
-            logCapture(`[${sessionId}] Session timed out after ${Math.round(elapsedTime / 1000 / 60)} minutes. Closing browser...`);
-
-            // Close the specific browser instance for the timed-out session
-            try {
-                if (browser) await browser.close();
-                logCapture(`[${sessionId}] Browser closed successfully.`);
-            } catch (closeError) {
-                logCapture(`[${sessionId}] ❌ ERROR closing timed-out browser: ${closeError.message}`);
-            } finally {
-                 // Always remove from active sessions map after attempting close
-                 delete activeSessions[sessionId];
-            }
+async function closeSession(sessionId) {
+    const session = activeSessions[sessionId];
+    if (!session) return false;
+    
+    try {
+        const { page, browser, logCapture = console.log } = session;
+        
+        // First remove route handlers
+        if (page && !page.isClosed()) {
+            await removeAllRoutes(page, sessionId, logCapture);
         }
+        
+        // Then close browser
+        if (browser) {
+            await browser.close().catch(e => {
+                logCapture(`[${sessionId}] Error closing browser: ${e.message}`);
+            });
+        }
+        
+        delete activeSessions[sessionId];
+        logCapture(`[${sessionId}] Session closed and removed from active sessions.`);
+        return true;
+    } catch (e) {
+        console.error(`Error closing session ${sessionId}:`, e);
+        delete activeSessions[sessionId]; // Still remove from active sessions
+        return false;
     }
-     if (cleanedCount > 0) {
-       console.log(`[SessionManager] Cleanup finished. Closed ${cleanedCount} timed-out session(s).`);
-    }
-    // REMOVED Cooldown check part
 }
 
 // --- Start Periodic Cleanup --- (No change)
 console.log(`[SessionManager] Initializing idle session cleanup. Timeout: ${SESSION_TIMEOUT_MS / 1000 / 60} mins, Check Interval: ${CLEANUP_INTERVAL_MS / 1000 / 60} mins.`);
-cleanupIdleSessions();
-const cleanupIntervalId = setInterval(cleanupIdleSessions, CLEANUP_INTERVAL_MS);
+startIdleSessionCleanup();
+const cleanupIntervalId = setInterval(startIdleSessionCleanup, CLEANUP_INTERVAL_MS);
 
 // --- Graceful Shutdown (Simplified: Close browsers in activeSessions) ---
 process.on('SIGINT', async () => {
@@ -274,3 +284,48 @@ module.exports = {
     startSession,
     activeSessions
 };
+
+/**
+ * Performs a cleanup of idle sessions
+ */
+function startIdleSessionCleanup() {
+    const now = Date.now();
+    const activeSessionCount = Object.keys(activeSessions).length;
+    console.log(`[SessionManager] Running cleanup check... Active: ${activeSessionCount}`);
+    
+    for (const [sessionId, session] of Object.entries(activeSessions)) {
+        const lastActiveTime = session.lastActiveTime || session.startTime || now;
+        const idleTimeMs = now - lastActiveTime;
+        
+        if (idleTimeMs >= SESSION_TIMEOUT_MS) {
+            console.log(`[SessionManager] Session ${sessionId} idle for ${Math.floor(idleTimeMs / 1000 / 60)} minutes, cleaning up...`);
+            
+            try {
+                // Close and cleanup this session
+                if (session.browser) {
+                    // First remove route handlers if exists
+                    if (session.page && !session.page.isClosed()) {
+                        try {
+                            session.page.unrouteAll({ behavior: 'ignoreErrors' }).catch(() => {});
+                        } catch (e) {
+                            // Ignore errors during unroute
+                        }
+                    }
+                    
+                    // Then close browser
+                    session.browser.close().catch(e => {
+                        console.error(`[SessionManager] Error closing browser for idle session ${sessionId}:`, e.message);
+                    });
+                }
+                
+                // Remove from active sessions
+                delete activeSessions[sessionId];
+                console.log(`[SessionManager] Idle session ${sessionId} cleaned up.`);
+            } catch (error) {
+                console.error(`[SessionManager] Error during cleanup of session ${sessionId}:`, error.message);
+                // Still remove from active sessions if cleanup failed
+                delete activeSessions[sessionId];
+            }
+        }
+    }
+}

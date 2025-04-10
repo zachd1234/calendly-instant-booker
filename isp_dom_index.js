@@ -4,6 +4,8 @@ const { bookMeeting } = require('./services/bookingService');
 const { activeSessions } = require('./sessionManager');
 // Import devices for browser emulation
 const { devices } = require('playwright');
+// Import standardizeBrowserProfile from browserUtils
+const { standardizeBrowserProfile } = require('./utils/browserUtils');
 
 /**
  * Standardizes the browser profile to ensure consistent Calendly access
@@ -11,88 +13,6 @@ const { devices } = require('playwright');
  * @param {string} sessionId - Session ID for logging
  * @param {Function} logCapture - Logging function
  */
-async function standardizeBrowserProfile(page, sessionId, logCapture) {
-    logCapture(`[${sessionId}] Standardizing browser profile to bypass geographic restrictions...`);
-    
-    try {
-        // 1. Use a consistent user agent (Chrome on Mac - widely accepted)
-        const standardUserAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
-        
-        // Get the browser context from the page
-        const context = page.context();
-        
-        // Use context.setExtraHTTPHeaders instead of page.setUserAgent
-        await context.setExtraHTTPHeaders({
-            'User-Agent': standardUserAgent
-        });
-        
-        logCapture(`[${sessionId}] Set User-Agent via HTTP headers: ${standardUserAgent}`);
-        
-        // 2. Set standard viewport dimensions
-        await page.setViewportSize({ width: 1280, height: 800 });
-        
-        // 3. Set timezone to US/Pacific (LA) regardless of actual location
-        await page.evaluate(() => {
-            Object.defineProperty(Intl, 'DateTimeFormat', {
-                writable: true,
-                configurable: true
-            });
-            const originalDateTimeFormat = Intl.DateTimeFormat;
-            Intl.DateTimeFormat = function(...args) {
-                if (args.length > 0 && args[1] && args[1].timeZone) {
-                    args[1].timeZone = 'America/Los_Angeles';
-                }
-                return new originalDateTimeFormat(...args);
-            };
-            Intl.DateTimeFormat.prototype = originalDateTimeFormat.prototype;
-        });
-        
-        // 4. Set standard language
-        try {
-            await page.evaluate(() => {
-                try {
-                    Object.defineProperty(navigator, 'language', {
-                        get: function() { return 'en-US'; }
-                    });
-                } catch (propError) {
-                    // If property can't be redefined, log but continue
-                    console.log('Warning: Could not override navigator.language');
-                }
-                
-                try {
-                    Object.defineProperty(navigator, 'languages', {
-                        get: function() { return ['en-US', 'en']; }
-                    });
-                } catch (propError) {
-                    console.log('Warning: Could not override navigator.languages');
-                }
-            });
-        } catch (evalError) {
-            logCapture(`[${sessionId}] Warning: Could not set language properties: ${evalError.message}`);
-        }
-        
-        // 5. Also override navigator.userAgent in the page context
-        await page.evaluate((ua) => {
-            Object.defineProperty(navigator, 'userAgent', {
-                get: function() { return ua; }
-            });
-        }, standardUserAgent);
-        
-        // 6. Log the standardized profile
-        const currentUserAgent = await page.evaluate(() => navigator.userAgent);
-        logCapture(`[${sessionId}] Browser profile standardized to:`);
-        logCapture(`[${sessionId}] - User-Agent: ${currentUserAgent}`);
-        logCapture(`[${sessionId}] - Viewport: 1280x800`);
-        logCapture(`[${sessionId}] - Timezone: America/Los_Angeles (LA)`);
-        logCapture(`[${sessionId}] - Language: en-US`);
-        
-        return true;
-    } catch (error) {
-        logCapture(`[${sessionId}] ⚠️ Error standardizing browser profile: ${error.message}`);
-        return false;
-    }
-}
-
 // --- Helper: Parse Date/Time from Calendly URL ---
 function parseCalendlyUrl(url) {
     try {
@@ -172,8 +92,8 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
     }
     const { page, browser } = session;
 
-    // Apply browser profile standardization
-    logCapture(`[${sessionId}] Applying browser standardization to ensure consistent Calendly access...`);
+    // Apply browser profile standardization - ONLY if the page is not already navigating to a calendar
+    logCapture(`[${sessionId}] Ensuring browser standardization is consistent...`);
     await standardizeBrowserProfile(page, sessionId, logCapture);
 
     // 2. Parse Target Date/Time
@@ -501,9 +421,9 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
         const domNavigationTime = (Date.now() - navigationStartTime) / 1000;
         logCapture(`[${sessionId}] DOM Navigation to form page completed in ${domNavigationTime.toFixed(2)}s`);
 
-        // Apply browser standardization again before form filling
-        logCapture(`[${sessionId}] Re-standardizing browser profile before form submission...`);
-        await standardizeBrowserProfile(page, sessionId, logCapture);
+        // At the end before the booking service handoff - no need to re-standardize
+        // Just log that we're proceeding with the same standardized profile
+        logCapture(`[${sessionId}] Continuing with standardized browser profile for form submission...`);
 
         // --- Hand off to Booking Service ---
         logCapture(`[${sessionId}] Handing off to bookingService...`);
@@ -531,26 +451,38 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
         }
     } finally {
         // --- Session Cleanup (Simplified: Just close browser) ---
-        logCapture(`[${sessionId}] Booking attempt finished. Closing browser and removing session...`);
-        const sessionForCleanup = activeSessions[sessionId]; // Get session to access browser
-        const browserForCleanup = sessionForCleanup?.browser;
-
-        // Close the browser instance used by this session
         try {
-            if (browserForCleanup) {
-                await browserForCleanup.close();
-                logCapture(`[${sessionId}] Browser closed.`);
-            } else {
-                logCapture(`[${sessionId}] WARN: Browser object missing in session during cleanup.`);
+            // First, remove all route handlers to prevent errors during browser closure
+            if (page && !page.isClosed()) {
+                logCapture(`[${sessionId}] Removing route handlers before closing browser...`);
+                await page.unrouteAll({ behavior: 'ignoreErrors' }).catch(e => {
+                    logCapture(`[${sessionId}] Non-critical error unrouting: ${e.message}`);
+                });
             }
-        } catch (closeError) {
-            logCapture(`[${sessionId}] ❌ ERROR closing browser: ${closeError.message}`);
-        }
+            
+            logCapture(`[${sessionId}] Booking attempt finished. Closing browser and removing session...`);
+            const sessionForCleanup = activeSessions[sessionId]; // Get session to access browser
+            const browserForCleanup = sessionForCleanup?.browser;
 
-        // Always remove session from active map
-        if (activeSessions[sessionId]) {
-            delete activeSessions[sessionId];
-            logCapture(`[${sessionId}] Session removed from active map.`);
+            // Close the browser instance used by this session
+            try {
+                if (browserForCleanup) {
+                    await browserForCleanup.close();
+                    logCapture(`[${sessionId}] Browser closed.`);
+                } else {
+                    logCapture(`[${sessionId}] WARN: Browser object missing in session during cleanup.`);
+                }
+            } catch (closeError) {
+                logCapture(`[${sessionId}] ❌ ERROR closing browser: ${closeError.message}`);
+            }
+
+            // Always remove session from active map
+            if (activeSessions[sessionId]) {
+                delete activeSessions[sessionId];
+                logCapture(`[${sessionId}] Session removed from active map.`);
+            }
+        } catch (finallyError) {
+            logCapture(`[${sessionId}] Error during cleanup: ${finallyError.message}`);
         }
     }
 
