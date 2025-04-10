@@ -47,22 +47,54 @@ async function startSession(baseUrl, logCapture = console.log) {
     let page;
 
     try {
-        // 1. Launch Browser
-        logCapture(`[${sessionId}] Launching new browser with rotating proxy...`);
+        // 1. Launch Browser with improved settings to reduce fingerprinting
+        logCapture(`[${sessionId}] Launching new browser with rotating proxy and improved anti-fingerprinting...`);
         browser = await chromium.launch({
             headless: true, // <-- CHANGE THIS BACK: Run headless for production/normal use
-            proxy: proxySettings
+            proxy: proxySettings,
+            args: [
+                '--disable-blink-features=AutomationControlled',
+                '--disable-features=IsolateOrigins,site-per-process',
+                '--disable-site-isolation-trials',
+                '--disable-web-security',
+                '--no-sandbox',
+                '--disable-setuid-sandbox'
+            ]
         });
 
-        // 2. Create Context and Page
-        logCapture(`[${sessionId}] Creating new context and page...`);
+        // 2. Create Context with advanced settings
+        logCapture(`[${sessionId}] Creating new context with standardized settings...`);
         context = await browser.newContext({
             ignoreHTTPSErrors: true,
-            locale: 'en-US'
+            locale: 'en-US',
+            timezoneId: 'America/Los_Angeles', // Set to LA timezone
+            userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            viewport: { width: 1280, height: 800 },
+            deviceScaleFactor: 1,
+            hasTouch: false,
+            isMobile: false,
+            javaScriptEnabled: true,
+            acceptDownloads: false
         });
+        
+        // Add script to mask automation
+        await context.addInitScript(() => {
+            // Override properties that reveal automation
+            Object.defineProperty(navigator, 'webdriver', { get: () => false });
+            // Override chrome object
+            if (window.chrome) {
+                window.chrome = {};
+            }
+            // Override Permissions API
+            if (navigator.permissions) {
+                navigator.permissions.query = (parameters) => 
+                    Promise.resolve({ state: 'granted', onchange: null });
+            }
+        });
+        
         page = await context.newPage();
         const setupTime = (Date.now() - sessionStartTime) / 1000;
-        logCapture(`[${sessionId}] Browser, context, page created in ${setupTime.toFixed(2)}s.`);
+        logCapture(`[${sessionId}] Browser, context, page created in ${setupTime.toFixed(2)}s with standardized profile.`);
 
         // Resource blocking & Cookie check (remains the same)
         await page.route('**/*.{png,jpg,jpeg,gif,svg,webp,woff,woff2,ttf,otf,eot}', route => route.abort().catch(()=>{}));
@@ -80,19 +112,40 @@ async function startSession(baseUrl, logCapture = console.log) {
             } else { logCapture(`[${sessionId}] No cookie button found within 3 seconds.`); }
         } catch (e) { logCapture(`[${sessionId}] WARN: Cookie consent check failed: ${e.message}`); }
 
-        // 3. Navigate Page
+        // 3. Navigate Page with improved retry logic
         logCapture(`[${sessionId}] Navigating page to base URL: ${baseUrl}`);
         const navStartTime = Date.now();
-        await page.goto(baseUrl, {
-            waitUntil: 'domcontentloaded',
-            timeout: 60000
-        });
+        
+        // Try with three strategies in sequence if needed
+        let navigationSuccess = false;
+        const strategies = ['domcontentloaded', 'load', 'networkidle'];
+        const timeouts = [20000, 30000, 45000]; // Increasing timeouts
+        
+        for (let i = 0; i < strategies.length && !navigationSuccess; i++) {
+            try {
+                logCapture(`[${sessionId}] Navigation attempt ${i+1} with strategy '${strategies[i]}' and timeout ${timeouts[i]}ms...`);
+                await page.goto(baseUrl, {
+                    waitUntil: strategies[i],
+                    timeout: timeouts[i]
+                });
+                navigationSuccess = true;
+                logCapture(`[${sessionId}] Navigation succeeded with '${strategies[i]}' strategy.`);
+            } catch (navError) {
+                logCapture(`[${sessionId}] Navigation failed with '${strategies[i]}' strategy: ${navError.message}`);
+                if (i === strategies.length - 1) {
+                    throw navError; // Re-throw on final attempt
+                }
+                // Small wait between attempts
+                await page.waitForTimeout(1000);
+            }
+        }
+        
         const navTime = (Date.now() - navStartTime) / 1000;
         logCapture(`[${sessionId}] Navigated to base URL in ${navTime.toFixed(2)}s. Page title: ${await page.title().catch(() => 'Error getting title')}`);
 
         // 4. Store Active Session
         activeSessions[sessionId] = { page, browser, context, logCapture, startTime: sessionStartTime };
-        logCapture(`[${sessionId}] Session active and stored. Timeout: ${SESSION_TIMEOUT_MS / 1000 / 60} mins.`);
+        logCapture(`[${sessionId}] Session active and stored with standardized browser profile. Timeout: ${SESSION_TIMEOUT_MS / 1000 / 60} mins.`);
 
         const totalTime = (Date.now() - sessionStartTime) / 1000;
         return { success: true, sessionId: sessionId, duration: parseFloat(totalTime.toFixed(2)) };

@@ -1,7 +1,83 @@
 require('dotenv').config(); // Still needed if bookingService uses env vars? Review dependencies.
 const { bookMeeting } = require('./services/bookingService');
 // Import activeSessions map from sessionManager to find and delete sessions
-const { activeSessions, browserPool } = require('./sessionManager');
+const { activeSessions } = require('./sessionManager');
+// Import devices for browser emulation
+const { devices } = require('playwright');
+
+/**
+ * Standardizes the browser profile to ensure consistent Calendly access
+ * @param {Page} page - Playwright page object
+ * @param {string} sessionId - Session ID for logging
+ * @param {Function} logCapture - Logging function
+ */
+async function standardizeBrowserProfile(page, sessionId, logCapture) {
+    logCapture(`[${sessionId}] Standardizing browser profile to bypass geographic restrictions...`);
+    
+    try {
+        // 1. Use a consistent user agent (Chrome on Mac - widely accepted)
+        const standardUserAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+        
+        // Get the browser context from the page
+        const context = page.context();
+        
+        // Use context.setExtraHTTPHeaders instead of page.setUserAgent
+        await context.setExtraHTTPHeaders({
+            'User-Agent': standardUserAgent
+        });
+        
+        logCapture(`[${sessionId}] Set User-Agent via HTTP headers: ${standardUserAgent}`);
+        
+        // 2. Set standard viewport dimensions
+        await page.setViewportSize({ width: 1280, height: 800 });
+        
+        // 3. Set timezone to US/Pacific (LA) regardless of actual location
+        await page.evaluate(() => {
+            Object.defineProperty(Intl, 'DateTimeFormat', {
+                writable: true,
+                configurable: true
+            });
+            const originalDateTimeFormat = Intl.DateTimeFormat;
+            Intl.DateTimeFormat = function(...args) {
+                if (args.length > 0 && args[1] && args[1].timeZone) {
+                    args[1].timeZone = 'America/Los_Angeles';
+                }
+                return new originalDateTimeFormat(...args);
+            };
+            Intl.DateTimeFormat.prototype = originalDateTimeFormat.prototype;
+        });
+        
+        // 4. Set standard language
+        await page.evaluate(() => {
+            Object.defineProperty(navigator, 'language', {
+                get: function() { return 'en-US'; }
+            });
+            Object.defineProperty(navigator, 'languages', {
+                get: function() { return ['en-US', 'en']; }
+            });
+        });
+        
+        // 5. Also override navigator.userAgent in the page context
+        await page.evaluate((ua) => {
+            Object.defineProperty(navigator, 'userAgent', {
+                get: function() { return ua; }
+            });
+        }, standardUserAgent);
+        
+        // 6. Log the standardized profile
+        const currentUserAgent = await page.evaluate(() => navigator.userAgent);
+        logCapture(`[${sessionId}] Browser profile standardized to:`);
+        logCapture(`[${sessionId}] - User-Agent: ${currentUserAgent}`);
+        logCapture(`[${sessionId}] - Viewport: 1280x800`);
+        logCapture(`[${sessionId}] - Timezone: America/Los_Angeles (LA)`);
+        logCapture(`[${sessionId}] - Language: en-US`);
+        
+        return true;
+    } catch (error) {
+        logCapture(`[${sessionId}] ⚠️ Error standardizing browser profile: ${error.message}`);
+        return false;
+    }
+}
 
 // --- Helper: Parse Date/Time from Calendly URL ---
 function parseCalendlyUrl(url) {
@@ -60,6 +136,10 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
     }
     const { page, browser } = session;
 
+    // Apply browser profile standardization
+    logCapture(`[${sessionId}] Applying browser standardization to ensure consistent Calendly access...`);
+    await standardizeBrowserProfile(page, sessionId, logCapture);
+
     // 2. Parse Target Date/Time
     const targetDate = parseCalendlyUrl(fullBookingUrl);
     if (!targetDate) {
@@ -89,6 +169,36 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
     // *** END OF MOVED COOKIE CHECK ***
 
     try {
+        // Perform location diagnostics to check for potential issues
+        try {
+            logCapture(`[${sessionId}] Checking location for potential restrictions...`);
+            await page.goto('https://ipinfo.io/json', { waitUntil: 'domcontentloaded', timeout: 10000 });
+            const locationData = await page.evaluate(() => {
+                try {
+                    return JSON.parse(document.querySelector('pre').textContent);
+                } catch (e) {
+                    return { error: e.message };
+                }
+            });
+            
+            if (locationData && locationData.city) {
+                const isSanFrancisco = locationData.city === 'San Francisco' || 
+                    (locationData.region === 'California' && locationData.loc?.startsWith('37.7'));
+                
+                logCapture(`[${sessionId}] Location detected: ${locationData.city}, ${locationData.region}, ${locationData.country}`);
+                logCapture(`[${sessionId}] IP: ${locationData.ip}, ISP: ${locationData.org || 'Unknown'}`);
+                
+                if (isSanFrancisco) {
+                    logCapture(`[${sessionId}] ⚠️ WARNING: Connected from San Francisco area which may experience Calendly timeouts`);
+                    logCapture(`[${sessionId}] Proceeding with enhanced browser standardization...`);
+                    // Re-apply standardization with extra parameters
+                    await standardizeBrowserProfile(page, sessionId, logCapture);
+                }
+            }
+        } catch (locError) {
+            logCapture(`[${sessionId}] WARN: Location check failed: ${locError.message}`);
+        }
+
         // --- DOM Navigation Steps ---
         const navigationStartTime = Date.now(); // Timer for DOM nav part
 
@@ -112,7 +222,7 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
             // Target month is in the future, click 'Next Month' button 'monthDifference' times
             logCapture(`[${sessionId}] Navigating forward ${monthDifference} months...`);
             const nextMonthButtonSelector = 'button[aria-label="Go to next month"]';
-// This file handles Step 2: Booking using an existing session via DOM interaction.
+            
             for (let i = 0; i < monthDifference; i++) {
                 try {
                     await page.waitForSelector(nextMonthButtonSelector, { timeout: 5000, state: 'visible' });
@@ -121,7 +231,19 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
                     await page.waitForTimeout(250);
                 } catch (e) {
                     logCapture(`[${sessionId}] ❌ ERROR clicking next month button on click #${i + 1}: ${e.message}`);
-                    throw new Error(`Failed during month navigation on click ${i + 1}.`);
+                    // On failure, check if browser standardization is still intact
+                    const currentUserAgent = await page.evaluate(() => navigator.userAgent).catch(() => 'unknown');
+                    if (!currentUserAgent.includes('Mac OS X 10_15')) {
+                        logCapture(`[${sessionId}] User agent has changed, re-standardizing before retry...`);
+                        await standardizeBrowserProfile(page, sessionId, logCapture);
+                        await page.waitForTimeout(1000); // Extra wait for standardization to take effect
+                        // Try again after standardization
+                        await page.waitForSelector(nextMonthButtonSelector, { timeout: 5000, state: 'visible' });
+                        await page.click(nextMonthButtonSelector);
+                        logCapture(`[${sessionId}] Retry succeeded after re-standardization.`);
+                    } else {
+                        throw new Error(`Failed during month navigation on click ${i + 1}.`);
+                    }
                 }
             }
             logCapture(`[${sessionId}] Finished navigating forward ${monthDifference} months.`);
@@ -195,6 +317,10 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
         const domNavigationTime = (Date.now() - navigationStartTime) / 1000;
         logCapture(`[${sessionId}] DOM Navigation to form page completed in ${domNavigationTime.toFixed(2)}s`);
 
+        // Apply browser standardization again before form filling
+        logCapture(`[${sessionId}] Re-standardizing browser profile before form submission...`);
+        await standardizeBrowserProfile(page, sessionId, logCapture);
+
         // --- Hand off to Booking Service ---
         logCapture(`[${sessionId}] Handing off to bookingService...`);
         const bookingStartTime = Date.now();
@@ -203,6 +329,7 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
 
         if (bookingServiceResult.success) {
             logCapture(`[${sessionId}] ✅ bookingService reported SUCCESS in ${bookingServiceDuration.toFixed(2)}s.`);
+            stepSuccess = true;
             return { success: true, error: null, duration: bookingServiceDuration, sessionId: sessionId };
         } else {
             logCapture(`[${sessionId}] ❌ bookingService reported FAILURE in ${bookingServiceDuration.toFixed(2)}s. Error: ${bookingServiceResult.error}`);
@@ -257,6 +384,8 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
         bookingServiceDuration: parseFloat(bookingServiceDuration.toFixed(2)),
         error: finalError
     };
-}// Ensure only bookSession is exported
+}
+
+// Ensure only bookSession is exported
 module.exports = { bookSession };
 
