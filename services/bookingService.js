@@ -50,8 +50,7 @@ async function humanType(page, selector, text) {
 
   // Reduced typing delay
   for (const char of text) {
-    // await page.keyboard.type(char, { delay: Math.floor(Math.random() * 10) + 5 });
-    await page.keyboard.type(char, { delay: 1 }); // Minimal 1ms delay
+    await page.keyboard.type(char, { delay: Math.floor(Math.random() * 10) + 5 });
   }
 
   // Verify what was typed
@@ -97,37 +96,31 @@ async function findFieldWithRetry(page, selector, fieldName, maxRetries, retryTi
 }
 
 // Set to true for debug screenshots, false for performance
-// const DEBUG_MODE = false; // We can remove or ignore this now
+const DEBUG_MODE = false;
 
 /**
  * Books a Calendly meeting using an existing Playwright page object.
  * Assumes the page is already navigated to the correct Calendly booking URL.
  *
- * @param {string} sessionId - The unique session identifier.
  * @param {import('playwright').Page} page - The Playwright page object.
  * @param {string} name - The name to fill in the form.
  * @param {string} email - The email to fill in the form.
  * @param {string} phone - The phone number to fill in the form.
- * @param {function} logCapture - Logging function.
- * @returns {Promise<object>} - Object with success status and optional error.
+ * @returns {Promise<boolean>} - True if booking seems successful, false otherwise.
  */
-async function bookMeeting(sessionId, page, name, email, phone, logCapture) {
-  // Use default console.log if logCapture isn't provided (robustness)
-  logCapture = logCapture || console.log;
-
-  logCapture(`[${sessionId}] [BookingService] Starting booking process on existing page...`);
+async function bookMeeting(page, name, email, phone) {
+  console.log('[BookingService] Starting booking process on existing page...');
   const formStartTime = Date.now();
 
   try {
-    // Reduced wait time - assume page is mostly ready
-    await page.waitForTimeout(300);
+    // Add the 300ms pause here using standard JavaScript
+    await new Promise(resolve => setTimeout(resolve, 300));
 
     // Debug output of page title
-    const pageTitle = await page.title().catch(() => 'Error getting title');
-    logCapture(`[${sessionId}] [BookingService] Page title: ${pageTitle}`);
+    console.log('[BookingService] Page title:', await page.title());
 
     // --- Cookie Consent Handling (Optional but recommended) ---
-    logCapture(`[${sessionId}] [BookingService] Handling cookie consent (quick check)...`);
+    console.log('[BookingService] Handling cookie consent (quick check)...');
     const cookieSelector = '#onetrust-accept-btn-handler'; // Define selector once
     try {
         const cookieButton = await page.waitForSelector(cookieSelector, { timeout: 500 }).catch(() => null);
@@ -146,18 +139,17 @@ async function bookMeeting(sessionId, page, name, email, phone, logCapture) {
     }
 
     // --- Form Filling ---
-    logCapture(`[${sessionId}] [BookingService] Locating required form fields in parallel...`);
+    console.log('[BookingService] Locating required form fields in parallel...');
     
     // Wait for the main form container first 
     try {
-        logCapture(`[${sessionId}] [BookingService] Waiting for form container...`);
+        console.log('[BookingService] Waiting for form container...');
         // Adjust selector if you find a more specific/stable one like 'form[data-testid="booking-form"]'
-        await page.waitForSelector('form', { state: 'visible', timeout: 30000 });
-        logCapture(`[${sessionId}] [BookingService] Form container found.`);
+        await page.waitForSelector('form', { state: 'visible', timeout: 15000 });
+        console.log('[BookingService] Form container found.');
     } catch (e) {
-        logCapture(`[${sessionId}] [BookingService] ❌ Error waiting for form container: ${e.message}`);
-        // No need for DEBUG_MODE check for screenshot on critical failure
-        await page.screenshot({ path: `error-no-form-container_${sessionId}.png` }).catch(err => logCapture(`[${sessionId}] Error taking screenshot: ${err.message}`));
+        console.error('[BookingService] ❌ Error waiting for form container:', e.message);
+        if (DEBUG_MODE) await page.screenshot({ path: 'error-no-form-container.png' });
         return { success: false, error: `Failed to find form container: ${e.message}` };
     }
 
@@ -171,95 +163,152 @@ async function bookMeeting(sessionId, page, name, email, phone, logCapture) {
 
     try {
         // Run findFieldWithRetry for Name and Email in parallel using specific IDs
-        logCapture(`[${sessionId}] [BookingService] Starting parallel search for Name and Email fields using IDs...`);
+        console.log('[BookingService] Starting parallel search for Name and Email fields using IDs...');
         [nameFieldLocator, emailFieldLocator] = await Promise.all([
             findFieldWithRetry(page, nameSelectorId, 'Name', maxRetries, retryTimeout),
             findFieldWithRetry(page, emailSelectorId, 'Email', maxRetries, retryTimeout)
         ]);
-        logCapture(`[${sessionId}] [BookingService] Found both Name and Email fields.`);
+        console.log('[BookingService] Found both Name and Email fields.');
 
         // *** FILL FIELDS *** (Now that locators are found)
         // Pass the specific ID selectors to fastFill
-        logCapture(`[${sessionId}] [BookingService] Filling Name field...`);
         await fastFill(page, nameSelectorId, name); 
-        logCapture(`[${sessionId}] [BookingService] Filling Email field...`);
         await fastFill(page, emailSelectorId, email);
 
     } catch (error) {
-        logCapture(`[${sessionId}] [BookingService] Failed to find required fields in parallel: ${error.message}`);
-        await page.screenshot({ path: `error-parallel-field-find_${sessionId}.png` }).catch(err => logCapture(`[${sessionId}] Error taking screenshot: ${err.message}`));
+        // Error is thrown by findFieldWithRetry if retries fail for either field
+        console.error('[BookingService] Failed to find required fields in parallel:', error.message);
+        // Optional: Screenshot on failure
+        if (DEBUG_MODE) await page.screenshot({ path: 'error-parallel-field-find.png' }).catch(()=>{});
         return { success: false, error: `Failed parallel field find: ${error.message}` };
     }
     
-    // --- *** REVISED Phone Field Handling (More Patient Wait) *** ---
-    logCapture(`[${sessionId}] [BookingService] Checking for phone input field (waiting up to 15s)...`);
-    const phoneInputSelector = 'input[type="tel"]'; // Selector for the actual input
-    const phoneWaitTimeout = 15000; // Increased wait time (15 seconds)
-    let phoneFilled = false;
+    // *** REMOVED Sequential Retry Loops for Name and Email ***
 
+    // --- *** REVISED Phone Field Handling (Quick Label Check First) *** ---
+    console.log('[BookingService] Starting improved phone field detection...');
+    let phoneFilled = false;
+    const phoneSelectorType = 'input[type="tel"]'; // Use type selector for stability
+    
+    // STEP 1: Quick check for phone label or container (500ms)
+    console.log('[BookingService] Checking for phone label or container (quick check: 500ms)...');
+    const phoneLabels = [
+        'label:has-text("Phone")',
+        'label:has-text("phone")',
+        'label:has-text("Phone Number")',
+        'label:has-text("Mobile")',
+        'label:has-text("Contact number")',
+        'div:has-text("Phone"):not(:has(input))', // Text-only divs that might be labels
+        'div[data-component="phone-field"]' // Known container from previous code
+    ];
+    
+    let phoneFieldLikelyExists = false;
+    
     try {
-        // Wait directly for the input field to be visible
-        const phoneElement = await page.waitForSelector(phoneInputSelector, { state: 'visible', timeout: phoneWaitTimeout });
-        logCapture(`[${sessionId}] [BookingService] Found phone input field.`);
+        // Use a locator that combines all potential phone label selectors
+        const phoneLabelLocator = page.locator(phoneLabels.join(', '));
+        phoneFieldLikelyExists = await phoneLabelLocator.count({ timeout: 500 }) > 0;
         
-        // Fill the input field
+        if (phoneFieldLikelyExists) {
+            console.log('[BookingService] Found potential phone label/container. Will proceed with input field search.');
+        } else {
+            console.log('[BookingService] No phone label/container found quickly. Assuming no phone field required.');
+        }
+    } catch (e) {
+        console.log('[BookingService] Error during quick phone label check:', e.message);
+        // Assume no phone field if check fails
+        phoneFieldLikelyExists = false;
+    }
+    
+    // STEP 2: If label was found, proceed with multi-stage input field search
+    if (phoneFieldLikelyExists) {
+        console.log('[BookingService] Proceeding with multi-stage phone input field search...');
+        let phoneElement = null;
+        
+        // Stage 1: Quick Check (1.5 seconds)
+        console.log('[BookingService] Phone Check - Stage 1 (Quick: 1.5s timeout)...');
         try {
-            logCapture(`[${sessionId}] [BookingService] Filling phone number with provided value: ${phone}`);
-            await page.focus(phoneInputSelector);
-            await page.click(phoneInputSelector, { clickCount: 3 });
-            await page.keyboard.press('Backspace');
-            await page.fill(phoneInputSelector, phone);
-            logCapture(`[${sessionId}] [BookingService] Phone field filled.`);
-            phoneFilled = true;
-        } catch (fillError) {
-            logCapture(`[${sessionId}] [BookingService] ⚠️ Error filling phone field even after finding input: ${fillError.message}`);
+            phoneElement = await page.waitForSelector(phoneSelectorType, { state: 'visible', timeout: 1500 });
+            console.log('[BookingService] Found phone field in Stage 1.');
+        } catch (e) {
+            console.log('[BookingService] Phone field not found in Stage 1. Waiting 0.5s...');
+            await page.waitForTimeout(500); // Short wait after first failure
+
+            // Stage 2: Medium Check (3 seconds)
+            console.log('[BookingService] Phone Check - Stage 2 (Medium: 3s timeout)...');
+            try {
+                phoneElement = await page.waitForSelector(phoneSelectorType, { state: 'visible', timeout: 3000 });
+                console.log('[BookingService] Found phone field in Stage 2.');
+            } catch (e2) {
+                console.log('[BookingService] Phone field not found in Stage 2. Waiting 1s...');
+                await page.waitForTimeout(1000); // Longer wait after second failure
+
+                // Stage 3: Final Check (5 seconds)
+                console.log('[BookingService] Phone Check - Stage 3 (Final: 5s timeout)...');
+                try {
+                    phoneElement = await page.waitForSelector(phoneSelectorType, { state: 'visible', timeout: 5000 });
+                    console.log('[BookingService] Found phone field in Stage 3.');
+                } catch (e3) {
+                    console.log('[BookingService] Phone field not found after all stages. Skipping phone field.');
+                    phoneElement = null; // Ensure it's null if not found
+                }
+            }
         }
 
-    } catch (inputError) {
-        // Input field didn't appear within the longer timeout
-        logCapture(`[${sessionId}] [BookingService] Phone input field ('${phoneInputSelector}') did not become visible within ${phoneWaitTimeout / 1000}s. Assuming not required or optional.`);
-        // No error thrown, just proceed without filling the phone number
+        // Fill the field if it was found in any stage
+        if (phoneElement) {
+            try {
+                // --- HARDCODE PHONE NUMBER HERE ---
+                const hardcodedPhone = '+1 3109122322'; 
+                console.log(`[BookingService] Filling phone number with HARDCODED value: ${hardcodedPhone}`);
+                // Use the stable selector 'phoneSelectorType' for filling
+                await page.focus(phoneSelectorType);
+                await page.click(phoneSelectorType, { clickCount: 3 });
+                await page.keyboard.press('Backspace');
+                // --- Use the hardcoded variable ---
+                await page.fill(phoneSelectorType, hardcodedPhone); 
+                console.log('[BookingService] Phone field filled.');
+                phoneFilled = true;
+            } catch (fillError) {
+                console.error(`[BookingService] ⚠️ Error filling phone field even after finding it: ${fillError.message}`);
+                // Continue without phone if filling fails
+            }
+        }
+    } else {
+        console.log('[BookingService] Skipping phone field search and fill (no label detected).');
     }
     // --- *** END REVISED Phone Field Handling *** ---
 
-    // --- TAKE SCREENSHOT AFTER FILLING ---
-    logCapture(`[${sessionId}] [BookingService] Form fields potentially filled. Taking screenshot before submit...`);
-    try {
-        await page.screenshot({ path: `form-filled-service_${sessionId}.png` }); // Use sessionId in filename
-        logCapture(`[${sessionId}] [BookingService] Screenshot 'form-filled-service_${sessionId}.png' saved.`);
-    } catch (ssError) {
-         logCapture(`[${sessionId}] [BookingService] WARN: Failed to take post-fill screenshot: ${ssError.message}`);
-    }
-    // --- END SCREENSHOT ---
+    if (DEBUG_MODE) await page.screenshot({ path: 'form-filled-service.png' });
 
     // --- Submit Button --- (Optimized with Primary Check)
-    logCapture(`[${sessionId}] [BookingService] Looking for submit button...`);
+    console.log('[BookingService] Looking for submit button...');
     let submitButtonFound = false;
     const primarySubmitSelector = 'button[type="submit"]';
     const primaryTimeout = 2000; // Short timeout for primary check
 
     // 1. Try primary selector first
-    logCapture(`[${sessionId}] [BookingService] Trying primary selector ('${primarySubmitSelector}') first with ${primaryTimeout}ms timeout...`);
+    console.log(`[BookingService] Trying primary selector ('${primarySubmitSelector}') first with ${primaryTimeout}ms timeout...`);
     try {
         const primaryButton = page.locator(primarySubmitSelector).first(); // Take first if multiple
         if (await primaryButton.isVisible({ timeout: primaryTimeout }) && 
             await primaryButton.isEnabled({ timeout: 500 })) { // Quick enable check
             
-            logCapture(`[${sessionId}] [BookingService] Found clickable button with primary selector.`);
+            console.log('[BookingService] Found clickable button with primary selector.');
             await primaryButton.scrollIntoViewIfNeeded();
             await primaryButton.click({ force: true, timeout: 5000 }); 
             submitButtonFound = true;
-            logCapture(`[${sessionId}] [BookingService] Submit button clicked (primary check).`);
+            console.log('[BookingService] Submit button clicked (primary check).');
         } else {
-            logCapture(`[${sessionId}] [BookingService] Primary submit button found but not immediately clickable.`);
+            console.log('[BookingService] Primary submit button found but not immediately clickable.');
         }
     } catch (e) {
-        logCapture(`[${sessionId}] [BookingService] Primary submit selector ('${primarySubmitSelector}') failed or timed out: ${e.message}`);
+        console.log(`[BookingService] Primary submit selector ('${primarySubmitSelector}') failed or timed out: ${e.message}`);
     }
 
     // 2. If primary failed, try fallback logic (existing .or chain)
     if (!submitButtonFound) {
-        logCapture(`[${sessionId}] [BookingService] Primary check failed, trying fallback role-based button detection...`);
+        console.log('[BookingService] Primary check failed, trying fallback role-based button detection...');
         try {
             const submitButton = await page.locator('button[type="submit"]') // Keep original chain here as fallback
               .or(page.getByRole('button', { name: /Schedule|Confirm|Book|Submit|Next|Continue|Complete|Finish|Reserve/i }))
@@ -271,34 +320,34 @@ async function bookMeeting(sessionId, page, name, email, phone, logCapture) {
                // Use slightly longer timeout for fallback check
                if (await firstVisibleButton.isVisible({ timeout: 3000 }) && 
                    await firstVisibleButton.isEnabled({ timeout: 1000 })) {
-                   logCapture(`[${sessionId}] [BookingService] Found clickable submit button via fallback locator.`);
+                   console.log('[BookingService] Found clickable submit button via fallback locator.');
                    await firstVisibleButton.scrollIntoViewIfNeeded();
                    await firstVisibleButton.click({ force: true, timeout: 5000 }); 
                    submitButtonFound = true;
-                   logCapture(`[${sessionId}] [BookingService] Submit button clicked (fallback check).`);
+                   console.log('[BookingService] Submit button clicked (fallback check).');
                } else {
-                   logCapture(`[${sessionId}] [BookingService] Fallback locator found button(s), but none seem clickable.`);
+                   console.log('[BookingService] Fallback locator found button(s), but none seem clickable.');
                     // Try JS click as fallback if locator found something but couldn't click
                     try {
                         await firstVisibleButton.dispatchEvent('click');
                         submitButtonFound = true;
-                        logCapture(`[${sessionId}] [BookingService] Submit button clicked via JS event dispatch (fallback check).`);
+                        console.log('[BookingService] Submit button clicked via JS event dispatch (fallback check).');
                     } catch (jsClickError) {
-                        logCapture(`[${sessionId}] [BookingService] JS dispatch click also failed (fallback check): ${jsClickError.message}`);
+                        console.log('[BookingService] JS dispatch click also failed (fallback check): ', jsClickError.message);
                     }
                }
             } else {
-               logCapture(`[${sessionId}] [BookingService] No button found via fallback locators either.`);
+               console.log('[BookingService] No button found via fallback locators either.');
             }
       
           } catch (e) {
-            logCapture(`[${sessionId}] [BookingService] Error during fallback button search: ${e.message}`);
+            console.log(`[BookingService] Error during fallback button search: ${e.message}`);
           }
     }
 
     // 3. Fallback JavaScript submission if all else failed
     if (!submitButtonFound) {
-      logCapture(`[${sessionId}] [BookingService] Button locators failed or click failed, trying JavaScript form submission...`);
+      console.log('[BookingService] Button locators failed or click failed, trying JavaScript form submission...');
       try {
         const submitted = await page.evaluate(() => {
           const forms = document.querySelectorAll('form');
@@ -307,196 +356,154 @@ async function bookMeeting(sessionId, page, name, email, phone, logCapture) {
             const buttons = form.querySelectorAll('button:not([type="button"]), input[type="submit"]');
              if (buttons.length > 0) {
                 const submitBtn = buttons[buttons.length - 1]; // Assume last button is submit
-                logCapture(`[${sessionId}] [BookingService-Eval] Clicking last button in form: ${submitBtn.outerHTML}`);
+                console.log('[BookingService-Eval] Clicking last button in form:', submitBtn.outerHTML);
                 submitBtn.click();
                 return true;
              } else {
-                 logCapture(`[${sessionId}] [BookingService-Eval] No submit buttons found in form, trying form.submit()`);
+                 console.log('[BookingService-Eval] No submit buttons found in form, trying form.submit()');
                  if (typeof form.submit === 'function') {
                     form.submit();
                     return true;
                  } else {
-                    logCapture(`[${sessionId}] [BookingService-Eval] form.submit is not a function`);
+                    console.log('[BookingService-Eval] form.submit is not a function');
                     return false;
                  }
              }
           }
-           logCapture(`[${sessionId}] [BookingService-Eval] No forms found.`);
+           console.log('[BookingService-Eval] No forms found.');
           return false;
         });
 
         if (submitted) {
-            logCapture(`[${sessionId}] [BookingService] JavaScript form submission attempt executed.`);
+            console.log('[BookingService] JavaScript form submission attempt executed.');
             submitButtonFound = true; // Assume it worked or is in progress
             // Replace fixed timeout with wait for potential page update
-            logCapture(`[${sessionId}] [BookingService] Waiting for page state change after JS submit (max 5s)...`);
+            console.log('[BookingService] Waiting for page state change after JS submit (max 5s)...');
             await page.waitForLoadState('domcontentloaded', { timeout: 5000 });
-            logCapture(`[${sessionId}] [BookingService] Page state likely updated or timeout reached after JS submit.`);
+            console.log('[BookingService] Page state likely updated or timeout reached after JS submit.');
         } else {
-            logCapture(`[${sessionId}] [BookingService] JavaScript form submission approach failed.`);
+            console.log('[BookingService] JavaScript form submission approach failed.');
         }
       } catch (e) {
-        logCapture(`[${sessionId}] [BookingService] Error with JavaScript form submission: ${e.message}`);
+        console.log('[BookingService] Error with JavaScript form submission:', e.message);
       }
     }
 
     if (!submitButtonFound) {
-      logCapture(`[${sessionId}] [BookingService] ⚠️ Warning: Could not reliably find or click any submit button.`);
+      console.log('[BookingService] ⚠️ Warning: Could not reliably find or click any submit button.');
+      if (DEBUG_MODE) await page.screenshot({ path: 'no-submit-button-service.png' });
        // Consider returning false here if submission is critical
        // return false;
     } else {
-      logCapture(`[${sessionId}] [BookingService] Submit initiated. Waiting briefly for page transition/network idle before confirmation checks...`);
-      // *** Wait for network idle after successful click/submit ***
-      try {
-          // Replace domcontentloaded with networkidle
-          await page.waitForLoadState('networkidle', { timeout: 7000 }); // Wait up to 7s for network idle after submit
-          logCapture(`[${sessionId}] [BookingService] Network appears idle after submit.`);
-      } catch(loadStateError) {
-          logCapture(`[${sessionId}] [BookingService] WARN: Timed out waiting for network idle after submit (${loadStateError.message}). Proceeding with confirmation checks anyway...`);
-      }
+      console.log('[BookingService] Submit initiated, waiting for confirmation or navigation...');
     }
+
 
     // --- Confirmation Check (Revised) ---
-     logCapture(`[${sessionId}] [BookingService] Waiting for explicit confirmation or error indicators (max 60s)...`); // Updated log based on previous change
+     try {
+        console.log('[BookingService] Waiting for explicit confirmation or error indicators (max 30s)...');
 
-    const successSelectors = [
-        'div[data-container="booking-container"]',
-        'div.confirmation-page',
-        'h1:has-text("Confirmed")',
-        'h1:has-text("You are scheduled")',
-        'div:has-text("successfully scheduled")',
-        'p:has-text("confirmation has been sent")',
-        'div[class*="success"i]:visible',
-        'div[class*="confirmed"i]:visible',
-         // Add more specific selectors if you identify them
-    ];
+        const successSelectors = [
+            // Focus on key text indicators of the final state
+            'h1:has-text("You are scheduled")',                     // Exact H1 text seems reliable
+            'div:has-text("A calendar invitation has been sent")',  // Specific confirmation text div
 
-    const errorSelectors = [
-        'div[class*="error"i]:visible',
-        'p[class*="error"i]:visible',
-        'span[class*="error"i]:visible',
-        'div:has-text("could not be scheduled"):visible',
-        // REMOVED specific selector from here - will check separately if timeout occurs
-         // Add more specific selectors for other known errors
-    ];
+            // Keep original fallbacks as lower priority if needed (though .first() takes precedence)
+            'h1:has-text("Confirmed")',
+            'div:has-text("successfully scheduled")',
+            'div[class*="success"i]:visible',
+            'div[class*="confirmed"i]:visible',
+        ];
 
-    // Promise for detecting success - Increase timeout to 60s
-    const successPromise = page.locator(successSelectors.join(', ')).first().waitFor({ state: 'visible', timeout: 60000 });
+        const errorSelectors = [
+            'div[class*="error"i]:visible',
+            'p[class*="error"i]:visible',
+            'span[class*="error"i]:visible',
+            'div:has-text("could not be scheduled"):visible',
+            // REMOVED specific selector from here - will check separately if timeout occurs
+             // Add more specific selectors for other known errors
+        ];
 
-    // Promise for detecting error - Increase timeout to 60s
-    const errorPromise = page.locator(errorSelectors.join(', ')).first().waitFor({ state: 'visible', timeout: 60000 });
+        // Promise for detecting success - Increased timeout
+        const successPromise = page.locator(successSelectors.join(', ')).first().waitFor({ state: 'visible', timeout: 30000 });
 
-    // Race the promises
-    const result = await Promise.race([
-        successPromise.then(() => 'success').catch(() => null), // Return 'success' if success element appears
-        errorPromise.then(async (errorElement) => {
-             const errorText = await errorElement.textContent();
-             logCapture(`[${sessionId}] [BookingService] ❌ Explicit error detected: ${errorText?.trim()}`);
-             // Capture screenshot specifically on detected error
-             if (page && !page.isClosed()) {
-                 await page.screenshot({ path: `error-explicit-detected-service_${sessionId}.png` }).catch(e=>logCapture(`[${sessionId}] Error taking screenshot: ${e.message}`));
-             }
-             return 'error'; // Return 'error' if error element appears
-        }).catch(() => null),
-        page.waitForTimeout(60000).then(() => 'timeout') // Also update the final race timeout to 60s
-    ]);
+        // Promise for detecting error - Increased timeout
+        const errorPromise = page.locator(errorSelectors.join(', ')).first().waitFor({ state: 'visible', timeout: 30000 });
 
-    const formTime = (Date.now() - formStartTime) / 1000;
-    logCapture(`[${sessionId}] [BookingService] Form processing and confirmation wait completed in ${formTime.toFixed(2)}s`);
+        // Race the promises
+        const result = await Promise.race([
+            successPromise.then(() => 'success').catch(() => null), // Return 'success' if success element appears
+            errorPromise.then(async (errorElement) => {
+                 const errorText = await errorElement.textContent();
+                 console.error(`[BookingService] ❌ Explicit error detected: ${errorText?.trim()}`);
+                 return 'error'; // Return 'error' if error element appears
+            }).catch(() => null),
+            // Increased fallback timeout
+            page.waitForTimeout(30000).then(() => 'timeout') // Return 'timeout' if neither appears within 30s
+        ]);
 
-    if (result === 'success') {
-        logCapture(`[${sessionId}] [BookingService] ✅ Explicit confirmation indicator found.`);
-        await page.screenshot({ path: `confirmed-service_${sessionId}.png` });
-        return { success: true };
-    } else if (result === 'error') {
-         // Already logged the specific error in the Promise.race handler
-         const errorText = await errorElement?.textContent() || 'Unknown explicit error'; // Attempt to get error text again
-         return { success: false, error: `Explicit error detected: ${errorText.trim()}` };
-    } else { // result === 'timeout'
-        logCapture(`[${sessionId}] [BookingService] ⚠️ Timed out waiting for explicit confirmation or general error indicator. Checking for specific popups...`);
+        const formTime = (Date.now() - formStartTime) / 1000;
+        console.log(`[BookingService] Form processing and confirmation wait completed in ${formTime.toFixed(2)}s`);
 
-        // *** Check for post-submit unavailable popup after timeout ***
-        const unavailableText = "Sorry, that time is no longer available.";
-        try {
-             const unavailableHeading = page.getByRole('heading', { name: unavailableText, exact: false });
-             if (await unavailableHeading.isVisible({ timeout: 5000 })) { // 5s check
-                  logCapture(`[${sessionId}] [BookingService] ❌ Detected post-submit message after timeout: "${unavailableText}"`);
-                  await page.screenshot({ path: `error-slot-unavailable-post-submit_${sessionId}.png` }).catch(e=>logCapture(`[${sessionId}] Error taking screenshot: ${e.message}`));
-                  return { success: false, error: `Slot became unavailable post-submit: "${unavailableText}"` };
-             } else {
-                logCapture(`[${sessionId}] [BookingService] Post-submit unavailable heading not found/visible within extra 5s check.`);
-             }
-        } catch (e) {
-             logCapture(`[${sessionId}] [BookingService] Error or timeout during secondary check for unavailable heading: ${e.message}`);
-        }
-        // *** END CHECK ***
+        if (result === 'success') {
+            console.log('[BookingService] ✅ Explicit confirmation indicator found.');
+            if (DEBUG_MODE) await page.screenshot({ path: 'confirmed-service.png' });
+            return { success: true };
+        } else if (result === 'error') {
+             // Already logged the specific error in the Promise.race handler
+             if (DEBUG_MODE) await page.screenshot({ path: 'error-explicit-service.png' });
+             const errorText = await errorElement?.textContent() || 'Unknown explicit error'; // Get error text if possible
+             return { success: false, error: `Explicit error detected: ${errorText.trim()}` };
+        } else { // result === 'timeout'
+            console.log('[BookingService] ⚠️ Timed out waiting for explicit confirmation or general error indicator. Checking for specific popups...');
 
-        // *** ADD CAPTCHA Check after timeout ***
-        let captchaDetected = false;
-        try {
-            logCapture(`[${sessionId}] [BookingService] Performing quick check for CAPTCHA elements...`);
-            const captchaSelectors = [
-                'iframe[src*="recaptcha"]', 
-                'iframe[title*="recaptcha"i]',
-                'iframe[src*="hcaptcha"]',
-                'iframe[title*="hcaptcha"i]',
-                'div[data-captcha-enable="true"]', // Some common patterns
-                'div:has-text("Verify you are human")' 
-            ];
-            const captchaElement = page.locator(captchaSelectors.join(', ')).first();
-            if (await captchaElement.isVisible({ timeout: 3000 })) { // Quick 3s check
-                 logCapture(`[${sessionId}] [BookingService] ⚠️ Potential CAPTCHA element detected after submit timeout.`);
-                 captchaDetected = true;
-                 // *** Take screenshot immediately upon CAPTCHA detection ***
-                 try {
-                    // Remove the 1-second delay before CAPTCHA screenshot
-                    // logCapture(`[${sessionId}] [BookingService] Waiting 1 second after CAPTCHA detection before screenshot...`); 
-                    // await page.waitForTimeout(1000); // Remove 1s delay back
-                    logCapture(`[${sessionId}] [BookingService] Taking CAPTCHA detected screenshot...`);
-                    await page.screenshot({ path: `captcha-detected_${sessionId}.png` }).catch(e=>logCapture(`[${sessionId}] Error taking CAPTCHA screenshot: ${e.message}`));
-                 } catch (ssError) {
-                    logCapture(`[${sessionId}] [BookingService] WARN: Failed to take CAPTCHA detected screenshot: ${ssError.message}`);
+            // *** UPDATED AGAIN: Explicit check for post-submit unavailable popup after timeout ***
+            const unavailableText = "Sorry, that time is no longer available.";
+            try {
+                 // Use getByRole, but give this specific check a bit more time
+                 const unavailableHeading = page.getByRole('heading', { name: unavailableText, exact: false });
+                 
+                 // Increased timeout for this specific secondary check to 5000ms
+                 if (await unavailableHeading.isVisible({ timeout: 5000 })) { 
+                      console.error(`[BookingService] ❌ Detected post-submit message after timeout: "${unavailableText}"`);
+                      if (DEBUG_MODE) await page.screenshot({ path: 'error-slot-unavailable-post-submit.png' });
+                      return { success: false, error: `Slot became unavailable post-submit: "${unavailableText}"` };
+                 } else {
+                    // Log if the check was performed but element wasn't visible within the extended secondary timeout
+                    console.log(`[BookingService] Post-submit unavailable heading not found/visible within extra 5s check.`);
                  }
-            } else {
-                 logCapture(`[${sessionId}] [BookingService] No obvious CAPTCHA elements found quickly.`);
+            } catch (e) {
+                 // Error here likely means timeout occurred during the isVisible check for the heading
+                 console.log(`[BookingService] Error or timeout during secondary check for unavailable heading: ${e.message}`);
             }
-        } catch (e) {
-             logCapture(`[${sessionId}] [BookingService] Error during CAPTCHA check: ${e.message}`);
+            // *** END UPDATED CHECK ***
+
+            // Optional: Check body text one last time as a weak confirmation
+             const bodyText = await page.locator('body').textContent({ timeout: 1000 }).catch(() => '');
+             const lowerBodyText = bodyText.toLowerCase();
+             const confirmationKeywords = ['confirmed', 'success', 'thank you', 'scheduled', 'booked', 'complete'];
+             if (confirmationKeywords.some(keyword => lowerBodyText.includes(keyword))) {
+                 console.log('[BookingService] Found weak confirmation text in body after timeout.');
+                 if (DEBUG_MODE) await page.screenshot({ path: 'final-state-weak-confirm-service.png' });
+                 return { success: true };
+             }
+            if (DEBUG_MODE) await page.screenshot({ path: 'timeout-no-confirm-service.png' });
+            return { success: false, error: 'Timed out waiting for confirmation (30s)' };
         }
-        // *** END CAPTCHA Check ***
 
-         const bodyText = await page.locator('body').textContent({ timeout: 1000 }).catch(() => '');
-         const lowerBodyText = bodyText.toLowerCase();
-         const confirmationKeywords = ['confirmed', 'success', 'thank you', 'scheduled', 'booked', 'complete'];
-         if (!captchaDetected && confirmationKeywords.some(keyword => lowerBodyText.includes(keyword))) { // Also check captchaDetected here
-             logCapture(`[${sessionId}] [BookingService] Found weak confirmation text in body after timeout (and no CAPTCHA detected).`);
-             await page.screenshot({ path: `final-state-weak-confirm-service_${sessionId}.png` }).catch(e=>logCapture(`[${sessionId}] Error taking screenshot: ${e.message}`));
-             return { success: true }; // Consider it success if keywords found after timeout
-         }
-        // Remove the 1-second delay before the timeout screenshot
-        // logCapture(`[${sessionId}] [BookingService] Waiting 1 second before timeout/captcha screenshot...`); 
-        // await page.waitForTimeout(1000); // Remove 1s delay back
-        await page.screenshot({ path: `timeout-or-captcha-screenshot_${sessionId}.png` }).catch(e=>logCapture(`[${sessionId}] Error taking screenshot: ${e.message}`)); // Renamed screenshot
-        // Modify error message based on CAPTCHA detection
-        const finalErrorMsg = captchaDetected 
-            ? 'Potential CAPTCHA detected after submit (60s timeout)' 
-            : 'Timed out waiting for confirmation (60s)';
-        return { success: false, error: finalErrorMsg };
-    }
+     } catch (e) {
+         console.log(`[BookingService] Error during confirmation wait logic: ${e.message}.`);
+          if (DEBUG_MODE) await page.screenshot({ path: 'error-confirmation-logic-service.png' });
+         // Consider checking for explicit error elements even in this catch block if needed
+         return { success: false, error: `Error in confirmation logic: ${e.message}` };
+     }
 
- } catch (error) {
-    logCapture(`[${sessionId}] [BookingService] ❌ Unhandled error during booking process: ${error.message}`);
-    logCapture(`[${sessionId}] [BookingService] Stack Trace: ${error.stack}`); // Log stack for unhandled errors
-    // Check if page exists and is open before taking screenshot
-    if (page && !page.isClosed()) {
-        // Attempt screenshot on uncaught error
-        await page.screenshot({ path: `error-uncaught-service_${sessionId}.png` }).catch(err => logCapture(`[${sessionId}] [BookingService] ERROR: Failed screenshot on unhandled error: ${err.message}`));
-    } else {
-        logCapture(`[${sessionId}] [BookingService] WARN: Page object not available or closed, skipping screenshot on unhandled error.`);
-    }
-    // Return a standard failure object
+  } catch (error) {
+    console.error('[BookingService] ❌ Unhandled error during booking process:', error);
+    if (DEBUG_MODE) await page.screenshot({ path: 'error-uncaught-service.png' }).catch(() => {});
     return { success: false, error: `Unhandled error in bookingService: ${error.message}` };
- }
+  }
+  // Note: We do not close the page, context, or browser here. The caller is responsible.
 }
 
 module.exports = { bookMeeting };

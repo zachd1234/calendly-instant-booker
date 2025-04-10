@@ -4,6 +4,8 @@ const path = require('path');
 const { startSession } = require('./sessionManager');
 // Import bookSession from ISP_index instead of isp_dom_index
 const { bookSession } = require('./ISP_index');
+// Import bookSession from isp_dom_index AS bookSessionDom
+const { bookSession: bookSessionDom } = require('./isp_dom_index');
 
 // Create Express app
 const app = express();
@@ -127,6 +129,68 @@ app.post('/api/book-session', async (req, res) => {
              message: 'An unexpected server error occurred during session booking.',
              sessionId: req.body.sessionId, // Include session ID if possible
              logs: logs // Include logs even in fatal error response
+            });
+    }
+});
+
+// --- Endpoint for Booking using a Session (DOM Version) ---
+app.post('/api/book-session-dom', async (req, res) => {
+    console.log(`Received /api/book-session-dom request for Session ID: ${req.body.sessionId}`);
+    const logs = []; // Create a log collector for this request
+    const logCapture = (message) => {
+      console.log(message);
+      logs.push(message);
+    };
+
+    try {
+        const { sessionId, fullBookingUrl, name, email, phone } = req.body;
+
+        // --- Re-use SERVER-SIDE VALIDATION ---
+        const phoneRegex = /^\+\d{1,4}\s\d{7,}$/;
+        if (!sessionId || !fullBookingUrl || !name || !email || !phone || !phoneRegex.test(phone)) {
+            let missingFields = [];
+            if (!sessionId) missingFields.push('sessionId');
+            if (!fullBookingUrl) missingFields.push('fullBookingUrl');
+            if (!name) missingFields.push('name');
+            if (!email) missingFields.push('email');
+            if (!phone) missingFields.push('phone');
+            let message = `Missing or invalid required fields: ${missingFields.join(', ')}.`;
+            if (phone && !phoneRegex.test(phone)) {
+                message += ' Phone format invalid (Expected: +1 123...).';
+            }
+
+            logCapture(`ERROR: Missing/Invalid required fields for book-session-dom. Provided: ${JSON.stringify(req.body)}`);
+            return res.status(400).json({
+                success: false,
+                message: message,
+                logs: logs
+            });
+        }
+        // --- END VALIDATION ---
+
+        // Pass the validated data to bookSessionDom (from isp_dom_index.js)
+        const result = await bookSessionDom(sessionId, fullBookingUrl, name, email, phone, logCapture);
+
+        // Include logs in the response.
+        if (result.success) {
+             logCapture(`[${sessionId}] API reports booking (DOM) successful in ${result.duration}s.`);
+             // Add potential new metrics like domNavigationTime if available
+             res.json({ ...result, logs: logs });
+        } else {
+             logCapture(`[${sessionId}] API reports booking (DOM) failed. Error: ${result.error}. Duration: ${result.duration}s.`);
+             res.status(500).json({ ...result, logs: logs });
+        }
+
+    } catch (error) {
+        // Catch totally unexpected errors in this endpoint handler
+        const errorMessage = `Unexpected server error during session booking (DOM): ${error.message || error}`;
+        logCapture(`FATAL ERROR in /api/book-session-dom for session ${req.body.sessionId}: ${errorMessage}`);
+        console.error(`FATAL ERROR in /api/book-session-dom for session ${req.body.sessionId}:`, error);
+        res.status(500).json({
+             success: false,
+             message: 'An unexpected server error occurred during session booking (DOM).',
+             sessionId: req.body.sessionId,
+             logs: logs
             });
     }
 });

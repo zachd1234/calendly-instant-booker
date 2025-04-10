@@ -64,7 +64,7 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
         // 3. Hand off to Booking Service
         logCapture(`[${sessionId}] Preparing to hand off to bookingService...`);
         const bookingStartTime = Date.now();
-        bookingServiceResult = await bookMeeting(sessionId, page, name, email, phone, logCapture); // Add sessionId here
+        bookingServiceResult = await bookMeeting(page, name, email, phone);
         bookingServiceDuration = (Date.now() - bookingStartTime) / 1000;
         logCapture(`[${sessionId}] bookingService call completed in ${bookingServiceDuration.toFixed(2)}s.`);
 
