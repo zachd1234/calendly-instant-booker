@@ -347,8 +347,15 @@
                 loading.style.display = 'block';
 
                 // Get form data
-                const countryCode = document.getElementById('phone-country-code').value.trim();
-                const number = document.getElementById('phone-number').value.trim().replace(/[\s-]/g, ''); // Remove spaces/dashes from number part
+                let countryCode = document.getElementById('phone-country-code').value.trim(); // Use let to allow modification
+                const number = document.getElementById('phone-number').value.trim().replace(/\s+/g, ''); // Remove internal spaces too
+
+                // Ensure country code starts with +
+                if (countryCode && !countryCode.startsWith('+')) {
+                    countryCode = '+' + countryCode;
+                    console.log('Added "+" to country code.'); // Optional: log this change
+                }
+
                 const combinedPhone = `${countryCode} ${number}`; // Format: +1 1234567890
 
                 const formData = {
