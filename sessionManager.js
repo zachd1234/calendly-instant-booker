@@ -11,7 +11,7 @@ const activeSessions = {};
 // --- Configuration ---
 const SESSION_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;    // 5 minutes
-const MAX_IP_RETRIES = 3; // Max retries if specific problematic IP is detected
+const MAX_IP_RETRIES = 8; // Increased max retries for problematic IPs to improve success rate
 // PROXY_LIST_PATH is no longer needed
 
 // --- State ---
@@ -770,7 +770,7 @@ function startIdleSessionCleanup() {
 
 /**
  * Starts a predictive session with two separate browser instances for two potential meeting times
- * @param {string} baseUrl - The base Calendly URL (not used in this implementation)
+ * @param {string} baseUrl - The base Calendly URL
  * @param {string} bookingUrl1 - First specific booking URL with date/time
  * @param {string} bookingUrl2 - Second specific booking URL with date/time
  * @param {Object} clientInfo - Client information for booking
@@ -789,13 +789,13 @@ async function startPredictiveSession(baseUrl, bookingUrl1, bookingUrl2, clientI
         // Import the new predictive booking service
         const { prepareBooking } = require('./services/predictiveBookingService');
         
-        // Start two separate browser sessions going directly to the specific booking URLs
-        logCapture(`[${masterSessionId}] Launching first browser directly to booking URL 1...`);
-        const session1Promise = startSession(bookingUrl1, 
+        // Start two separate browser sessions going first to the base URL
+        logCapture(`[${masterSessionId}] Launching first browser starting with base URL: ${baseUrl}`);
+        const session1Promise = startSession(baseUrl, 
             (msg) => logCapture(`[Option1] ${msg}`));
             
-        logCapture(`[${masterSessionId}] Launching second browser directly to booking URL 2...`);
-        const session2Promise = startSession(bookingUrl2, 
+        logCapture(`[${masterSessionId}] Launching second browser starting with base URL: ${baseUrl}`);
+        const session2Promise = startSession(baseUrl, 
             (msg) => logCapture(`[Option2] ${msg}`));
         
         // Wait for both sessions to initialize
@@ -817,11 +817,112 @@ async function startPredictiveSession(baseUrl, bookingUrl1, bookingUrl2, clientI
         if (activeSessions[sessionId1]) {
             activeSessions[sessionId1].clientInfo = { ...clientInfo };
             activeSessions[sessionId1].bookingUrl = bookingUrl1;
+            
+            // Wait a few seconds on base URL with some human-like interaction
+            const page1 = activeSessions[sessionId1].page;
+            logCapture(`[Option1] Interacting with base URL before proceeding to booking URL...`);
+            
+            // Perform some scrolling
+            await page1.evaluate(() => {
+                return new Promise(resolve => {
+                    // Scroll down slowly
+                    let totalScroll = 0;
+                    const maxScroll = 300 + Math.random() * 200;
+                    
+                    const scrollStep = () => {
+                        const step = 10 + Math.random() * 20;
+                        window.scrollBy(0, step);
+                        totalScroll += step;
+                        
+                        if (totalScroll < maxScroll) {
+                            setTimeout(scrollStep, 100 + Math.random() * 150);
+                        } else {
+                            // After scrolling down, scroll back up partially
+                            setTimeout(() => {
+                                window.scrollBy(0, -100 - Math.random() * 100);
+                                setTimeout(resolve, 500);
+                            }, 1000);
+                        }
+                    };
+                    
+                    setTimeout(scrollStep, 500 + Math.random() * 500);
+                });
+            });
+            
+            // Move mouse randomly
+            const viewportSize = await page1.viewportSize();
+            if (viewportSize) {
+                await page1.mouse.move(
+                    Math.random() * viewportSize.width * 0.8, 
+                    Math.random() * viewportSize.height * 0.8
+                );
+                await page1.waitForTimeout(300 + Math.random() * 500);
+            }
+            
+            // Wait a bit more with natural delay
+            await page1.waitForTimeout(1500 + Math.random() * 1000);
+            
+            // Now navigate to specific booking URL
+            logCapture(`[Option1] Navigating from base URL to specific booking URL: ${bookingUrl1}`);
+            await page1.goto(bookingUrl1, {
+                waitUntil: 'domcontentloaded',
+                timeout: 30000
+            });
         }
         
         if (activeSessions[sessionId2]) {
             activeSessions[sessionId2].clientInfo = { ...clientInfo };
             activeSessions[sessionId2].bookingUrl = bookingUrl2;
+            
+            // Wait a few seconds on base URL with some human-like interaction
+            const page2 = activeSessions[sessionId2].page;
+            logCapture(`[Option2] Interacting with base URL before proceeding to booking URL...`);
+            
+            // Perform some scrolling (slightly different pattern for variation)
+            await page2.evaluate(() => {
+                return new Promise(resolve => {
+                    // Scroll down in steps
+                    let scrollPosition = 0;
+                    const scrollTargets = [
+                        150 + Math.random() * 50, 
+                        300 + Math.random() * 100,
+                        200 + Math.random() * 100 // Scroll back up a bit
+                    ];
+                    
+                    const performScroll = (index) => {
+                        if (index >= scrollTargets.length) {
+                            resolve();
+                            return;
+                        }
+                        
+                        const target = scrollTargets[index];
+                        const scrollDiff = target - scrollPosition;
+                        window.scrollBy(0, scrollDiff);
+                        scrollPosition = target;
+                        
+                        setTimeout(() => performScroll(index + 1), 1000 + Math.random() * 500);
+                    };
+                    
+                    setTimeout(() => performScroll(0), 400 + Math.random() * 300);
+                });
+            });
+            
+            // Tab through elements a couple times
+            const tabCount = 1 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < tabCount; i++) {
+                await page2.keyboard.press('Tab');
+                await page2.waitForTimeout(300 + Math.random() * 400);
+            }
+            
+            // Wait a bit more with natural delay (slightly different from session 1)
+            await page2.waitForTimeout(1200 + Math.random() * 1500);
+            
+            // Now navigate to specific booking URL
+            logCapture(`[Option2] Navigating from base URL to specific booking URL: ${bookingUrl2}`);
+            await page2.goto(bookingUrl2, {
+                waitUntil: 'domcontentloaded',
+                timeout: 30000
+            });
         }
         
         // Link the two sessions together under the master session

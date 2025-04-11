@@ -339,6 +339,13 @@ app.post('/api/complete-predictive-booking', async (req, res) => {
             });
         }
 
+        // Find the other session ID (the one not being used for booking)
+        const masterSessionId = session.masterSessionId;
+        const otherSessionId = Object.keys(activeSessions).find(id => 
+            id !== sessionId && 
+            activeSessions[id].masterSessionId === masterSessionId
+        );
+
         logCapture(`Completing predictive booking for session ${sessionId} (Option ${selectedOption})...`);
         
         // Import the new function for form submission
@@ -346,6 +353,20 @@ app.post('/api/complete-predictive-booking', async (req, res) => {
         
         // Submit the form that's already filled out
         const result = await completeBooking(session.page, logCapture);
+        
+        // Whether successful or not, close the other session that wasn't selected
+        if (otherSessionId && activeSessions[otherSessionId]) {
+            logCapture(`Closing unused session ${otherSessionId} (Option ${selectedOption === 1 ? 2 : 1})...`);
+            try {
+                // Import closeSession function if not already available
+                const { closeSession } = require('./sessionManager');
+                await closeSession(otherSessionId);
+                logCapture(`Successfully closed unused session ${otherSessionId}`);
+            } catch (closeError) {
+                logCapture(`Warning: Error closing unused session ${otherSessionId}: ${closeError.message}`);
+                // Continue despite error closing other session
+            }
+        }
         
         if (result.success) {
             logCapture(`Successfully completed booking in ${result.submissionTime.toFixed(2)}s.`);
