@@ -196,8 +196,8 @@
             <h1>Calendly Auto Booker</h1>
             <nav>
                 <ul>
-                    <li><a href="#direct-booking" id="nav-direct-booking" class="active">Direct Booking</a></li>
-                    <li><a href="#calendar-navigation" id="nav-calendar-navigation">Calendar Navigation Booking</a></li>
+                    <li><a href="#direct-booking" id="nav-direct-booking">Direct Booking</a></li>
+                    <li><a href="#calendar-navigation" id="nav-calendar-navigation" class="active">Calendar Navigation Booking</a></li>
                     <li><a href="#predictive-booking" id="nav-predictive-booking">Predictive Booking</a></li>
                 </ul>
             </nav>
@@ -206,11 +206,11 @@
 
     <div class="container">
         <!-- Page Content Area -->
-        <div id="direct-booking-page" class="page-content active">
+        <div id="direct-booking-page" class="page-content">
             <h2>Direct Booking</h2>
-            <p>The Direct Booker uses a pre-warmed browser pool, with each browser session tied to a dedicated ISP proxy. These proxies are hosted in datacenters but registered under residential ISPs — combining the speed of datacenter IPs with the undetectability of residential ones.<br><br>The workflow has two steps. First, when Julian begins a call, the system assigns a dedicated IP and navigates to the customer's general Calendly page. This preloads assets and reduces perceived latency later in the process.<br><br>Then, when the user provides a fully-qualified Calendly booking URL (including a specific date and time), the system performs a direct page.goto() to that URL and fills out the form using a pre-scripted form filler.<br><br>This approach avoids complex DOM interactions on the calendar page — such as timezone shifts, hidden dates, and unreliable selectors — by skipping straight to the booking form. However, since it relies on a full navigation step, it can take up to 30 seconds during high-latency periods (but averages around 12).</p>
+            <p>
+                The workflow has two steps. First, as soon as Julian joins a call with a prospect, the program assigns a dedicated IP to the session and navigates to the customer's general Calendly page. Then, when the user provides a fully-qualified Calendly booking URL (including a specific date and time), the system performs a direct page.goto() to that URL and fills out the form using a pre-scripted form filler. This approach is simple because it avoids dealing with DOM interactions on the calendar page. However, since it relies on a full navigation step, it can take up to 30 seconds during high-latency periods and averages around 12. The system uses ISP proxies, which are hosted in data centers but offer residential-like undetectability.</p>
 
-            <!-- Existing Content Goes Here -->
             <!-- Preload Section (Now visible by default after modal dismissal) -->
             <div id="preload-section">
                 <div id="preload-error" class="preload-error"></div>
@@ -225,7 +225,7 @@
                 <div class="preload-loading" id="preload-loading">
                     <div class="spinner"></div>
                     <p>Initializing session and preloading Calendly page...
-                        A warm browser and IP are being set up behind the scenes. Est Time: 20 seconds.</p>
+                        A warm browser and IP are being set up behind the scenes. Est Time: 1 minute.</p>
                 </div>
                 <div class="logs" id="preload-logs" style="display: none; margin-top: 20px;">
                      <!-- Preload Logs will be inserted here -->
@@ -289,9 +289,9 @@
             </div>
         </div> <!-- End of direct-booking-page -->
 
-        <div id="calendar-navigation-page" class="page-content">
+        <div id="calendar-navigation-page" class="page-content active">
             <h2>Calendar Navigation Booking</h2>
-            <p>The Calendar Navigation Booker uses a pre-warmed browser pool, with each browser session tied to a dedicated ISP proxy. <br><br>The workflow consists of two steps. First, when Julian begins a call, the system assigns a dedicated IP and preloads the customer's general Calendly page in a background browser session. The browser stays idle on this page, warming assets and preparing for instant interaction.<br><br>When it's time to book, instead of navigating directly to a booking URL, the system behaves like a human — interacting with the page, clicking on the correct date, selecting a time slot, and then quickly filling out the form. Because the page and all calendar-related assets are already cached, this approach allows for sub-3-second booking times in many cases.<br><br>The main challenge with this method is handling dynamic calendar interfaces — including DOM inconsistencies, timezone shifts based on proxy location, and edge cases where the desired time slot isn't visible or rendered.</p>
+            <p>This workflow is two steps and has been my best-performing one. First, as soon as Julian joins a call with a prospect, the program assigns a dedicated IP to the session and navigates to the customer's general Calendly page, where it sits idly until it's time to book. Then, instead of performing a goto() directly to the booking URL, the system finds the booking slot on the calendar itself. The benefit of this approach is that all calendar-related assets are already cached, so there's virtually no loading time. The system uses ISP proxies, which are hosted in data centers but offer residential-like undetectability.</p>
             <!-- Calendar Navigation: Step 1 - Start Session (renamed from dtp-*) -->
             <div id="cn-start-section">
                 <div id="cn-start-error" class="preload-error"></div>
@@ -306,7 +306,7 @@
                 <div class="preload-loading" id="cn-start-loading">
                     <div class="spinner"></div>
                     <p>Initializing session and preloading Calendly page...
-                        A warm browser and IP are being set up behind the scenes. Est. Time: 20 seconds.</p>
+                        A warm browser and IP are being set up behind the scenes. Est. Time: 1 minute.</p>
                 </div>
                 <div class="logs" id="cn-start-logs" style="display: none; margin-top: 20px;">
                      <!-- Calendar Navigation Start Logs will be inserted here -->
@@ -372,7 +372,7 @@
 
         <div id="predictive-booking-page" class="page-content">
             <h2>Predictive Booking</h2>
-            <p>The Predictive Booking system allows Julian to suggest two potential meeting times to clients. It prepares browsers for both options so that when the client chooses one, the booking can be completed instantly.<br><br>Simply provide two specific Calendly booking URLs (with dates/times), and Julian will offer these choices to the client. When the client selects one, the system will immediately book that slot.</p>
+            <p>This workflow is an idea that could reduce the booking time to almost zero. When Julian says, "Does 3 PM Thursday or 11 AM Friday sound better?" the program could immediately begin filling out both booking forms and get them cued up. Then, when the prospect says: "Thursday at 3pm works best for me," all the booking system needs to do is press submit! That's exactly what this system does — and it delivers 1-2 second bookings. However, right now, the form prefilling step takes a few minutes because I added cautious browser initialization logic since I only have a limited number of ISP proxies and was concerned about getting blacklisted with such a direct approach.</p>
 
             <!-- Predictive Booking: Step 1 - Collect booking information -->
             <div id="pb-start-section">
@@ -565,8 +565,8 @@
                 showPage(predictiveBookingPage);
             });
 
-            // Initialize: Show the default page (Direct Booker)
-            showPage(directBookingPage);
+            // Initialize: Show the default page (Calendar Navigation)
+            showPage(calendarNavigationPage);
 
             // --- Utility Function to Display Logs ---
             function displayLogs(logContainer, logMessages) {

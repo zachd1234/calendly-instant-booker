@@ -249,7 +249,7 @@ async function startSession(baseUrl, logCapture = console.log, retryCount = 0) {
         
         // Launch with combined arguments
         browser = await chromium.launch({
-            headless: false,
+            headless: true,
             proxy: proxySettings,
             args: [...baseArgs, ...selectedOptionalArgs]
         });
