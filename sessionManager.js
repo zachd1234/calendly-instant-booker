@@ -20,10 +20,77 @@ const activeSessions = {};
 // REMOVED getProxySettingsForPoolEntry function
 
 // --- Step 1: Start Session (Launches browser with Rotating Proxy) ---
+
+/**
+ * Creates realistic human-like delays
+ * @param {Page} page - Playwright page
+ * @param {number} min - Minimum delay in ms
+ * @param {number} max - Maximum delay in ms
+ * @returns {Promise<number>} The actual delay used
+ */
+async function humanDelay(page, min = 500, max = 2000) {
+    const delay = Math.floor(Math.random() * (max - min)) + min;
+    await page.waitForTimeout(delay);
+    return delay;
+}
+
+/**
+ * Performs human-like mouse movements on the page
+ * @param {Page} page - Playwright page
+ * @param {string} sessionId - Session identifier for logging
+ * @param {Function} logCapture - Logging function
+ */
+async function simulateHumanMouseMovement(page, sessionId, logCapture) {
+    // Start position
+    let lastX = 100 + Math.floor(Math.random() * 500);
+    let lastY = 100 + Math.floor(Math.random() * 300);
+    
+    // Number of movements (fewer for better performance)
+    const movements = 3 + Math.floor(Math.random() * 5);
+    
+    for (let i = 0; i < movements; i++) {
+        // Generate next position with natural movement
+        const nextX = Math.max(0, Math.min(1200, lastX + (Math.random() - 0.5) * 300));
+        const nextY = Math.max(0, Math.min(700, lastY + (Math.random() - 0.5) * 200));
+        
+        // Fewer steps for better performance
+        const steps = 5 + Math.floor(Math.random() * 10);
+        
+        // Perform movement with intermediate points
+        for (let step = 1; step <= steps; step++) {
+            // Ease-in-out curve for natural movement
+            const t = step / steps;
+            const tSmoothstep = t * t * (3 - 2 * t);
+            
+            const x = lastX + (nextX - lastX) * tSmoothstep;
+            const y = lastY + (nextY - lastY) * tSmoothstep;
+            
+            await page.mouse.move(x, y);
+            await page.waitForTimeout(5 + Math.random() * 10); // Small delay
+        }
+        
+        // Update last position
+        lastX = nextX;
+        lastY = nextY;
+        
+        // Add a short pause between movements
+        await humanDelay(page, 50, 200);
+    }
+    
+    // Add some scrolling
+    const scrollAmount = Math.floor(Math.random() * 300) + 100;
+    await page.mouse.wheel(0, scrollAmount);
+    
+    logCapture(`[${sessionId}] Completed ${movements} human-like mouse movements`);
+}
+
+/**
+ * Enhanced start session function with advanced anti-bot measures
+ */
 async function startSession(baseUrl, logCapture = console.log) {
     const sessionId = crypto.randomUUID();
     const sessionStartTime = Date.now();
-    logCapture(`[${sessionId}] Attempting to start session with rotating ISP proxy... BaseURL: ${baseUrl}`);
+    logCapture(`[${sessionId}] Starting enhanced session with realistic browser behavior...`);
 
     // --- Configure Rotating Proxy ---
     const ZD_USERNAME = process.env.ZD_PROXY_USERNAME;
@@ -36,92 +103,162 @@ async function startSession(baseUrl, logCapture = console.log) {
     }
 
     const proxySettings = {
-        server: 'http://isp.oxylabs.io:8000', // Rotating endpoint, assuming http
+        server: 'http://isp.oxylabs.io:8000',
         username: ZD_USERNAME,
         password: ZD_PASSWORD
     };
     logCapture(`[${sessionId}] Using rotating proxy endpoint: ${proxySettings.server}`);
-    // --- End Proxy Config ---
 
     let browser;
     let context;
     let page;
 
     try {
-        // 1. Launch Browser with improved settings to reduce fingerprinting
-        logCapture(`[${sessionId}] Launching new browser with rotating proxy and improved anti-fingerprinting...`);
+        // 1. Launch Browser with enhanced stealth settings
+        logCapture(`[${sessionId}] Launching browser with advanced anti-fingerprinting...`);
+        
+        // Use a random set of args to vary the browser fingerprint
+        const baseArgs = [
+            '--disable-blink-features=AutomationControlled',
+            '--disable-features=IsolateOrigins,site-per-process',
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+        ];
+        
+        const optionalArgs = [
+            '--disable-accelerated-2d-canvas',
+            '--disable-canvas-aa',
+            '--disable-2d-canvas-clip-aa',
+            '--disable-gpu-driver-bug-workarounds',
+            '--disable-gpu-vsync',
+            '--disable-ipc-flooding-protection',
+            '--disable-notifications',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-breakpad',
+            '--disable-component-extensions-with-background-pages',
+            '--disable-extensions',
+            '--disable-features=TranslateUI',
+            '--disable-hang-monitor',
+            '--disable-ipc-flooding-protection',
+            '--disable-renderer-backgrounding',
+            '--enable-features=NetworkService,NetworkServiceInProcess',
+            '--force-color-profile=srgb',
+            '--metrics-recording-only',
+            '--mute-audio',
+            '--no-default-browser-check',
+            '--no-first-run',
+            '--password-store=basic',
+        ];
+        
+        // Add 3-8 random optional arguments to create variation
+        const selectedOptionalArgs = [];
+        for (const arg of optionalArgs) {
+            if (Math.random() > 0.6) { // 40% chance to include each arg
+                selectedOptionalArgs.push(arg);
+                // Don't add too many, cap at 8
+                if (selectedOptionalArgs.length >= 8) break;
+            }
+        }
+        
+        // Launch with combined arguments
         browser = await chromium.launch({
-            headless: true, // Set to true for production environments
+            headless: true,
             proxy: proxySettings,
-            args: [
-                // Enhanced stealth arguments
-                '--disable-blink-features=AutomationControlled',
-                '--disable-features=IsolateOrigins,site-per-process,SitePerProcess',
-                '--disable-site-isolation-trials',
-                '--disable-web-security',
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--disable-gpu',
-                '--disable-infobars',
-                '--window-position=0,0',
-                '--ignore-certificate-errors',
-                '--ignore-certificate-errors-spki-list',
-                '--mute-audio'
-            ]
+            args: [...baseArgs, ...selectedOptionalArgs]
         });
-
-        // 2. Create Context with advanced settings
-        logCapture(`[${sessionId}] Creating new context with standardized LA location settings...`);
+        
+        // Small randomization in viewport size
+        const widthVariation = Math.floor(Math.random() * 80); // +/- 40px
+        const heightVariation = Math.floor(Math.random() * 60); // +/- 30px
+        const viewportWidth = 1280 + (widthVariation - 40);
+        const viewportHeight = 800 + (heightVariation - 30);
+        
+        // 2. Create context with slightly randomized settings
+        logCapture(`[${sessionId}] Creating browser context with subtle randomizations...`);
         context = await browser.newContext({
             ignoreHTTPSErrors: true,
             locale: 'en-US',
-            timezoneId: 'America/Los_Angeles', // Set to LA timezone
+            timezoneId: 'America/Los_Angeles',
             userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            viewport: { width: 1280, height: 800 },
-            deviceScaleFactor: 1,
+            viewport: { 
+                width: viewportWidth, 
+                height: viewportHeight 
+            },
+            deviceScaleFactor: Math.random() > 0.5 ? 1 : 1.25, // Sometimes use Retina
             hasTouch: false,
             isMobile: false,
             javaScriptEnabled: true,
             acceptDownloads: false,
             extraHTTPHeaders: {
                 'Accept-Language': 'en-US,en;q=0.9',
-                'X-Forwarded-For': '128.97.27.37' // UCLA IP address (Los Angeles)
+                'X-Forwarded-For': '128.97.27.37', // UCLA IP
+                'Sec-Ch-Ua': '"Google Chrome";v="124", " Not;A Brand";v="99"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"macOS"',
             },
             geolocation: {
-                latitude: 34.052235, // LA coordinates
-                longitude: -118.243683,
+                latitude: 34.052235 + (Math.random() - 0.5) * 0.01, // Slight variation
+                longitude: -118.243683 + (Math.random() - 0.5) * 0.01,
                 accuracy: 100
             },
-            permissions: ['geolocation'] // Pre-grant geolocation permission
+            permissions: ['geolocation']
         });
         
-        // Add script to mask automation and set LA location
+        // Add enhanced stealth script with more realistic browser behavior
         await context.addInitScript(() => {
             // Override properties that reveal automation
             Object.defineProperty(navigator, 'webdriver', { get: () => false });
             
-            // Override chrome object
-            if (window.chrome) {
-                window.chrome = {};
+            // Add realistic browser features
+            if (!window.chrome) {
+                window.chrome = {
+                    runtime: {},
+                    loadTimes: function() {},
+                    csi: function() {},
+                    app: {}
+                };
             }
             
-            // Override Permissions API
+            // Add more realistic plugins
+            const originalPlugins = Navigator.prototype.plugins;
+            Object.defineProperty(Navigator.prototype, 'plugins', {
+                get: () => {
+                    const plugins = [
+                        { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                        { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: 'Portable Document Format' },
+                        { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
+                    ];
+                    
+                    // Add plugin methods and properties
+                    plugins.forEach(plugin => {
+                        plugin.item = () => plugin;
+                        plugin.namedItem = () => plugin;
+                        plugin.length = 1;
+                    });
+                    
+                    return plugins;
+                }
+            });
+            
+            // Override permissions API
             if (navigator.permissions) {
                 navigator.permissions.query = (parameters) => 
                     Promise.resolve({ state: 'granted', onchange: null });
             }
             
-            // Override geolocation API to return LA coordinates
+            // Override geolocation API
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition = function(success) {
+                    // Add slight random variation to coordinates
+                    const latVariation = (Math.random() - 0.5) * 0.01;
+                    const longVariation = (Math.random() - 0.5) * 0.01;
+                    
                     success({ 
                         coords: {
-                            latitude: 34.052235, // LA coordinates
-                            longitude: -118.243683,
+                            latitude: 34.052235 + latVariation,
+                            longitude: -118.243683 + longVariation,
                             accuracy: 100,
                             altitude: null,
                             altitudeAccuracy: null,
@@ -133,7 +270,7 @@ async function startSession(baseUrl, logCapture = console.log) {
                 };
             }
             
-            // Set timezone to LA
+            // Set timezone with more natural implementation
             Object.defineProperty(Intl, 'DateTimeFormat', {
                 writable: true,
                 configurable: true
@@ -146,75 +283,249 @@ async function startSession(baseUrl, logCapture = console.log) {
                 return new originalDateTimeFormat(...args);
             };
             Intl.DateTimeFormat.prototype = originalDateTimeFormat.prototype;
+            
+            // Add hardware concurrency and device memory with slight variation
+            Object.defineProperty(navigator, 'hardwareConcurrency', {
+                get: () => Math.floor(Math.random() * 4) + 4 // 4-8 cores
+            });
+            
+            if (!navigator.deviceMemory) {
+                Object.defineProperty(navigator, 'deviceMemory', {
+                    get: () => Math.pow(2, Math.floor(Math.random() * 3) + 2) // 4, 8, or 16 GB
+                });
+            }
+            
+            // Add realistic battery API
+            if (!navigator.getBattery) {
+                navigator.getBattery = () => Promise.resolve({
+                    charging: Math.random() > 0.3, // 70% chance to be charging
+                    chargingTime: Math.random() > 0.5 ? Infinity : Math.floor(Math.random() * 3600),
+                    dischargingTime: Math.floor(Math.random() * 7200) + 1800,
+                    level: 0.25 + Math.random() * 0.75 // Random battery level between 25% and 100%
+                });
+            }
+            
+            // Add common browser storage items
+            try {
+                localStorage.setItem('_ga', `GA1.2.${Math.floor(Math.random() * 1000000000)}.${Math.floor(Date.now()/1000)}`);
+                localStorage.setItem('CookieConsent', 'true');
+                localStorage.setItem('timezone', 'America/Los_Angeles');
+                localStorage.setItem('returning_visitor', 'true');
+            } catch (e) {
+                // Ignore localStorage errors
+            }
         });
         
+        // Create page with small delay to make it more natural
         page = await context.newPage();
+        await humanDelay(page, 500, 1500);
+        
         const setupTime = (Date.now() - sessionStartTime) / 1000;
-        logCapture(`[${sessionId}] Browser, context, page created in ${setupTime.toFixed(2)}s with standardized profile.`);
+        logCapture(`[${sessionId}] Browser context created in ${setupTime.toFixed(2)}s with humanized settings.`);
 
-        // Resource blocking & Cookie check (remains the same)
-        await page.route('**/*.{png,jpg,jpeg,gif,svg,webp,woff,woff2,ttf,otf,eot}', route => route.abort().catch(()=>{}));
-        await page.route(/google|facebook|analytics|hotjar|doubleclick/, route => route.abort().catch(()=>{}));
-        logCapture(`[${sessionId}] Resource blocking applied.`);
+        // Selective resource blocking - allow some resources through for more natural behavior
+        await page.route('**/*.{woff,woff2,ttf,png,jpg,jpeg}', route => {
+            // Let some resources through randomly (20% chance)
+            if (Math.random() > 0.8) {
+                route.continue();
+            } else {
+                route.abort().catch(() => {});
+            }
+        });
+        
+        // Block analytics more selectively
+        await page.route(/google-analytics|facebook|hotjar|doubleclick/, route => route.abort().catch(() => {}));
+        logCapture(`[${sessionId}] Selective resource blocking applied.`);
+        
+        // Handle cookies with natural timing
         try {
-            logCapture(`[${sessionId}] Checking for cookie consent banner before navigation...`);
+            await humanDelay(page, 300, 1200);
+            logCapture(`[${sessionId}] Checking for cookie consent banner...`);
             const cookieSelector = '#onetrust-accept-btn-handler';
             const cookieButton = await page.waitForSelector(cookieSelector, { timeout: 3000, state: 'visible' }).catch(() => null);
             if (cookieButton) {
-                logCapture(`[${sessionId}] Found cookie button, clicking...`);
+                // Add natural delay before clicking cookie button
+                await humanDelay(page, 800, 2000);
+                logCapture(`[${sessionId}] Found cookie button, clicking naturally...`);
                 await cookieButton.click({ force: true, timeout: 2000 }).catch(e => logCapture(`[${sessionId}] WARN: Cookie click failed: ${e.message}`));
-                await page.waitForTimeout(500);
-                logCapture(`[${sessionId}] Cookie button clicked.`);
-            } else { logCapture(`[${sessionId}] No cookie button found within 3 seconds.`); }
-        } catch (e) { logCapture(`[${sessionId}] WARN: Cookie consent check failed: ${e.message}`); }
+                await humanDelay(page, 500, 1500);
+                logCapture(`[${sessionId}] Cookie consent handled.`);
+            } else { 
+                logCapture(`[${sessionId}] No cookie banner found.`); 
+            }
+        } catch (e) { 
+            logCapture(`[${sessionId}] WARN: Cookie consent check failed: ${e.message}`); 
+        }
 
-        // Apply the comprehensive one-time standardization
+        // Apply one-time standardization but with natural behavior
         await standardizeBrowserSession(browser, page, sessionId, logCapture);
+        await humanDelay(page, 500, 1500);
         
-        // Now navigate with the standardized profile
-        logCapture(`[${sessionId}] Navigating to Calendly URL with standardized profile: ${baseUrl}`);
+        // Simulate human navigation with pre-warming
+        logCapture(`[${sessionId}] Preparing human-like navigation to ${baseUrl}...`);
+        
+        // 1. Pre-warm connections with a HEAD request (optional)
+        try {
+            await page.evaluate(async (url) => {
+                try {
+                    await fetch(url, { 
+                        method: 'HEAD', 
+                        mode: 'no-cors', 
+                        cache: 'no-store',
+                        credentials: 'omit'
+                    });
+                } catch (e) {
+                    // Ignore errors, this is just for connection warming
+                }
+            }, baseUrl);
+            await humanDelay(page, 300, 800);
+        } catch (e) {
+            // Ignore errors, continue with navigation
+        }
+        
+        // Set referer to make it look like we came from a search engine
+        const referers = [
+            'https://www.google.com/search?q=calendly+scheduling',
+            'https://www.google.com/search?q=book+appointment+online',
+            'https://www.bing.com/search?q=calendly',
+            'https://duckduckgo.com/?q=online+scheduling+tool',
+            '',  // No referer sometimes
+        ];
+        
+        const selectedReferer = referers[Math.floor(Math.random() * referers.length)];
+        if (selectedReferer) {
+            await page.setExtraHTTPHeaders({
+                'Referer': selectedReferer
+            });
+            logCapture(`[${sessionId}] Set referer: ${selectedReferer}`);
+        }
+        
+        // Try navigation with progressive strategies
+        logCapture(`[${sessionId}] Starting human-like navigation...`);
         const navStartTime = Date.now();
         
-        // Try with three strategies in sequence if needed
+        // Dynamic strategies with progressive timeouts
+        const strategies = [
+            { name: 'domcontentloaded', timeout: 20000 },
+            { name: 'load', timeout: 30000 },
+            { name: 'networkidle', timeout: 45000 }
+        ];
+        
         let navigationSuccess = false;
-        const strategies = ['domcontentloaded', 'load', 'networkidle'];
-        const timeouts = [20000, 30000, 45000]; // Increasing timeouts
         
         for (let i = 0; i < strategies.length && !navigationSuccess; i++) {
             try {
-                logCapture(`[${sessionId}] Navigation attempt ${i+1} with strategy '${strategies[i]}' and timeout ${timeouts[i]}ms...`);
-                await page.goto(baseUrl, {
-                    waitUntil: strategies[i],
-                    timeout: timeouts[i]
+                logCapture(`[${sessionId}] Navigation attempt ${i+1}/${strategies.length} with strategy '${strategies[i].name}'...`);
+                
+                if (i > 0) {
+                    // Add longer delay between attempts
+                    await humanDelay(page, 2000, 4000);
+                    
+                    // Log retry attitude
+                    logCapture(`[${sessionId}] Retrying with more patience (${strategies[i].name})...`);
+                }
+                
+                // Navigate with current strategy
+                const response = await page.goto(baseUrl, {
+                    waitUntil: strategies[i].name,
+                    timeout: strategies[i].timeout
                 });
-                navigationSuccess = true;
-                logCapture(`[${sessionId}] Navigation succeeded with '${strategies[i]}' strategy.`);
+                
+                // Check if navigation was successful
+                if (response && response.status() >= 200 && response.status() < 400) {
+                    navigationSuccess = true;
+                    logCapture(`[${sessionId}] Navigation succeeded with '${strategies[i].name}' strategy, status: ${response.status()}`);
+                    
+                    // Add human delay after successful navigation
+                    await humanDelay(page, 800, 2000);
+                } else {
+                    throw new Error(`Received status code ${response ? response.status() : 'unknown'}`);
+                }
             } catch (navError) {
-                logCapture(`[${sessionId}] Navigation failed with '${strategies[i]}' strategy: ${navError.message}`);
+                logCapture(`[${sessionId}] Navigation attempt ${i+1} failed: ${navError.message}`);
+                
                 if (i === strategies.length - 1) {
                     throw navError; // Re-throw on final attempt
                 }
-                // Small wait between attempts
-                await page.waitForTimeout(1000);
+                
+                // Add longer wait between attempts
+                await humanDelay(page, 2000, 5000);
             }
         }
         
+        // After successful navigation, perform human-like interaction
+        logCapture(`[${sessionId}] Page loaded, simulating human browsing behavior...`);
+        
+        // Simulate human mouse movements and scrolling
+        await simulateHumanMouseMovement(page, sessionId, logCapture);
+        
+        // Add some keyboard interactions (tab navigation)
+        const tabCount = Math.floor(Math.random() * 3) + 1;
+        for (let i = 0; i < tabCount; i++) {
+            await humanDelay(page, 300, 800);
+            await page.keyboard.press('Tab');
+        }
+        
+        // Simulate human scrolling
+        await page.evaluate(() => {
+            return new Promise(resolve => {
+                let scrolledPixels = 0;
+                const targetScroll = Math.random() * 500 + 100;
+                
+                const scrollStep = () => {
+                    const step = Math.min(20 + Math.random() * 30, targetScroll - scrolledPixels);
+                    window.scrollBy(0, step);
+                    scrolledPixels += step;
+                    
+                    if (scrolledPixels < targetScroll) {
+                        setTimeout(scrollStep, 50 + Math.random() * 100);
+                    } else {
+                        resolve();
+                    }
+                };
+                
+                setTimeout(scrollStep, 500);
+            });
+        });
+        
+        // Get page title with error handling
+        const pageTitle = await page.title().catch(() => 'Unknown Page Title');
         const navTime = (Date.now() - navStartTime) / 1000;
-        logCapture(`[${sessionId}] Navigated to base URL in ${navTime.toFixed(2)}s. Page title: ${await page.title().catch(() => 'Error getting title')}`);
+        logCapture(`[${sessionId}] Completed human-like navigation in ${navTime.toFixed(2)}s. Page title: ${pageTitle}`);
 
-        // 4. Store Active Session
-        activeSessions[sessionId] = { page, browser, context, logCapture, startTime: sessionStartTime };
-        logCapture(`[${sessionId}] Session active and stored with standardized browser profile. Timeout: ${SESSION_TIMEOUT_MS / 1000 / 60} mins.`);
+        // Store session in active sessions
+        activeSessions[sessionId] = { 
+            page, 
+            browser, 
+            context, 
+            logCapture, 
+            startTime: sessionStartTime,
+            lastActiveTime: Date.now() // Track for session timeouts
+        };
+        
+        logCapture(`[${sessionId}] Session active with humanized browser profile. Timeout: ${SESSION_TIMEOUT_MS / 1000 / 60} mins.`);
 
         const totalTime = (Date.now() - sessionStartTime) / 1000;
         return { success: true, sessionId: sessionId, duration: parseFloat(totalTime.toFixed(2)) };
 
     } catch (error) {
         logCapture(`[${sessionId}] ❌ ERROR during session start: ${error}`);
+        
         // Cleanup on error: Close browser if launched
         if (browser) {
-             await browser.close().catch(e => logCapture(`[${sessionId}] Error closing browser during session start failure: ${e.message}`));
+            try {
+                // First remove route handlers if page exists
+                if (page && !page.isClosed()) {
+                    await page.unrouteAll({ behavior: 'ignoreErrors' }).catch(() => {});
+                }
+                
+                // Then close browser
+                await browser.close().catch(e => logCapture(`[${sessionId}] Error closing browser during session start failure: ${e.message}`));
+            } catch (cleanupError) {
+                logCapture(`[${sessionId}] Error during cleanup: ${cleanupError.message}`);
+            }
         }
+        
         delete activeSessions[sessionId]; // Ensure session is removed
 
         const totalTime = (Date.now() - sessionStartTime) / 1000;

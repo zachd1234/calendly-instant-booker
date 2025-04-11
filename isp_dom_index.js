@@ -129,55 +129,8 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
         // Remove the location diagnostics that navigates away from Calendly
         logCapture(`[${sessionId}] Starting booking process on Calendly URL: ${fullBookingUrl}`);
 
-        // Take a screenshot to see what page we're actually on
-        await page.screenshot({ path: `session_before_calendar_${sessionId}.png` });
-        logCapture(`[${sessionId}] Screenshot taken before calendar interaction`);
-
         // --- DOM Navigation Steps ---
         const navigationStartTime = Date.now(); // Timer for DOM nav part
-
-        // Debug: Wait and log what elements are visible on the page
-        try {
-            logCapture(`[${sessionId}] Waiting for calendar components to load...`);
-            
-            // Wait for any calendar elements
-            const calendarGrid = await page.waitForSelector('table[role="grid"]', { timeout: 20000 }).catch(() => null);
-            const monthHeader = await page.waitForSelector('[data-section="month"] h2', { timeout: 5000 }).catch(() => null);
-            
-            if (calendarGrid) {
-                logCapture(`[${sessionId}] ✅ Calendar grid found`);
-            } else {
-                logCapture(`[${sessionId}] ❌ Calendar grid not found`);
-            }
-            
-            if (monthHeader) {
-                const monthText = await monthHeader.textContent();
-                logCapture(`[${sessionId}] ✅ Month header found: "${monthText}"`);
-            } else {
-                logCapture(`[${sessionId}] ❌ Month header not found`);
-            }
-            
-            // Take a screenshot after waiting for calendar
-            await page.screenshot({ path: `session_calendar_state_${sessionId}.png` });
-            logCapture(`[${sessionId}] Calendar state screenshot captured`);
-            
-            // Check if there are any date buttons at all
-            const dateButtons = await page.$$('button[aria-label*="day"]').catch(() => []);
-            logCapture(`[${sessionId}] Found ${dateButtons.length} date buttons on page`);
-            
-            if (dateButtons.length > 0) {
-                // Log the first few date buttons
-                const buttonLabels = [];
-                for (let i = 0; i < Math.min(5, dateButtons.length); i++) {
-                    const label = await dateButtons[i].getAttribute('aria-label').catch(() => 'unknown');
-                    buttonLabels.push(label);
-                }
-                logCapture(`[${sessionId}] Sample date buttons: ${buttonLabels.join(', ')}`);
-            }
-            
-        } catch (debugError) {
-            logCapture(`[${sessionId}] WARN: Debug element check failed: ${debugError.message}`);
-        }
 
         // 3. Calculate Month Difference and Navigate
         const now = new Date();
@@ -272,12 +225,6 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
             }
         }
         
-        if (!dayButton) {
-            // Take a final screenshot before failing
-            await page.screenshot({ path: `session_day_not_found_${sessionId}.png` });
-            logCapture(`[${sessionId}] ❌ ERROR: Could not find day ${targetDate.day} with any selector strategy`);
-            throw new Error(`Day ${targetDate.day} not found with any selector strategy`);
-        }
         
         // Now check if it's disabled
         try {
@@ -291,10 +238,6 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
             logCapture(`[${sessionId}] Day ${targetDate.day} button found and is enabled using selector: ${usedSelector}. Clicking...`);
             await dayButton.click(); // Click the located button element
             logCapture(`[${sessionId}] Clicked day ${targetDate.day}.`);
-            
-            // Take a screenshot after clicking day
-            await page.screenshot({ path: `session_after_day_click_${sessionId}.png` });
-            logCapture(`[${sessionId}] After day click screenshot captured`);
             
             await page.waitForTimeout(1000); // Longer wait after day click
         } catch (e) {
@@ -315,8 +258,6 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
             await page.waitForSelector('button[data-container="time-button"]', { timeout: 10000 });
             logCapture(`[${sessionId}] ✅ Time buttons found`);
             
-            // Take a screenshot of available times
-            await page.screenshot({ path: `session_time_buttons_${sessionId}.png` });
             
             // Log all available times for debugging
             const timeButtons = await page.$$('button[data-container="time-button"]');
@@ -394,8 +335,6 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
                 logCapture(`[${sessionId}] Clicked time ${targetDate.timeString}.`);
             }
             
-            // Take a screenshot after clicking time
-            await page.screenshot({ path: `session_after_time_click_${sessionId}.png` });
             await page.waitForTimeout(1000); // Longer wait after time click
         } catch (e) {
             logCapture(`[${sessionId}] ❌ ERROR clicking time button: ${e.message}`);
@@ -434,7 +373,16 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
         if (bookingServiceResult.success) {
             logCapture(`[${sessionId}] ✅ bookingService reported SUCCESS in ${bookingServiceDuration.toFixed(2)}s.`);
             stepSuccess = true;
-            return { success: true, error: null, duration: bookingServiceDuration, sessionId: sessionId };
+            // Calculate overall duration here rather than just using bookingServiceDuration
+            const overallDuration = (Date.now() - overallStartTime) / 1000;
+            return { 
+                success: true, 
+                error: null, 
+                duration: parseFloat(overallDuration.toFixed(2)), 
+                formDuration: parseFloat(bookingServiceDuration.toFixed(2)),
+                domNavigationTime: parseFloat(domNavigationTime.toFixed(2)),
+                sessionId: sessionId 
+            };
         } else {
             logCapture(`[${sessionId}] ❌ bookingService reported FAILURE in ${bookingServiceDuration.toFixed(2)}s. Error: ${bookingServiceResult.error}`);
             stepSuccess = false;
@@ -498,6 +446,7 @@ async function bookSession(sessionId, fullBookingUrl, name, email, phone, logCap
         sessionId: sessionId,
         duration: parseFloat(overallDuration.toFixed(2)),
         bookingServiceDuration: parseFloat(bookingServiceDuration.toFixed(2)),
+        domNavigationTime: parseFloat(domNavigationTime.toFixed(2)),
         error: finalError
     };
 }

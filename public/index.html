@@ -781,15 +781,14 @@
                                 <div class="metric-label">Total Time</div>
                                 <div class="metric-value">${data.duration}s</div>
                             </div>
-                             <div class="metric">
+                            <div class="metric">
                                 <div class="metric-label">DOM Nav Time</div>
-                                <div class="metric-value">${(data.domNavigationTime || 'N/A')}s</div>
+                                <div class="metric-value">${(data.domNavigationTime || data.navigationTime || 'N/A')}s</div>
                             </div>
                             <div class="metric">
                                 <div class="metric-label">Form Filling Time</div>
-                                <div class="metric-value">${(data.bookingServiceDuration || 'N/A')}s</div>
+                                <div class="metric-value">${(data.formDuration || data.bookingServiceDuration || 'N/A')}s</div>
                             </div>
-                            <!-- Add other relevant metrics if returned by the DOM booker -->
                         `;
 
                         // Show DTP results section
