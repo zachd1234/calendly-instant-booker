@@ -1,7 +1,7 @@
 const express = require('express');
 const path = require('path');
 // Import startSession from sessionManager (no init needed)
-const { startSession } = require('./sessionManager');
+const { startSession, startPredictiveSession, activeSessions } = require('./sessionManager');
 // Import bookSession from ISP_index instead of isp_dom_index
 const { bookSession } = require('./ISP_index');
 // Import bookSession from isp_dom_index AS bookSessionDom
@@ -251,7 +251,6 @@ app.post('/api/start-predictive-session', async (req, res) => {
         logCapture(`Client: ${name}, ${email}, ${phone}`);
 
         // This will be implemented in the sessionManager.js
-        const { startPredictiveSession } = require('./sessionManager');
         const result = await startPredictiveSession(baseUrl, bookingUrl1, bookingUrl2, { name, email, phone }, logCapture);
 
         if (result.success) {
