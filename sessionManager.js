@@ -371,9 +371,12 @@ async function startSession(baseUrl, logCapture = console.log, retryCount = 0) {
             ipInfo = await response.json();
             logCapture(`[${sessionId}] IP Information: ${JSON.stringify(ipInfo, null, 2)}`);
 
-            const problematicIP = '45.196.58.213';
-            if (ipInfo && ipInfo.ip === problematicIP) {
-                logCapture(`[${sessionId}] Detected problematic IP: ${problematicIP}`);
+            // Define an array of problematic IPs
+            const problematicIPs = ['45.196.58.213', '50.117.28.79', '69.46.65.27'];
+            
+            // Check if the detected IP is in the problematic list
+            if (ipInfo && problematicIPs.includes(ipInfo.ip)) {
+                logCapture(`[${sessionId}] Detected problematic IP: ${ipInfo.ip}`);
                 if (retryCount < MAX_IP_RETRIES) {
                     logCapture(`[${sessionId}] Attempting retry (${retryCount + 1}/${MAX_IP_RETRIES})...`);
                     // Clean up current attempt before retrying
@@ -381,7 +384,7 @@ async function startSession(baseUrl, logCapture = console.log, retryCount = 0) {
                     // Recursive call with incremented retry count
                     return startSession(baseUrl, logCapture, retryCount + 1); 
                 } else {
-                    logCapture(`[${sessionId}] ❌ ERROR: Reached max retries (${MAX_IP_RETRIES}) for problematic IP ${problematicIP}. Failing session start.`);
+                    logCapture(`[${sessionId}] ❌ ERROR: Reached max retries (${MAX_IP_RETRIES}) for problematic IP ${ipInfo.ip}. Failing session start.`);
                     throw new Error(`Failed to get a non-problematic IP after ${MAX_IP_RETRIES} retries.`);
                 }
             }
