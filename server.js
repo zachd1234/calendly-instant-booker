@@ -195,6 +195,196 @@ app.post('/api/book-session-dom', async (req, res) => {
     }
 });
 
+// --- Endpoint for Starting a Predictive Session with Two Options ---
+app.post('/api/start-predictive-session', async (req, res) => {
+    console.log(`Received /api/start-predictive-session request`);
+    const logs = [];
+    const logCapture = (message) => {
+      console.log(message);
+      logs.push(message);
+    };
+
+    try {
+        const { bookingUrl1, bookingUrl2, name, email, phone } = req.body;
+
+        // --- Validate Inputs ---
+        const phoneRegex = /^\+\d{1,4}\s\d{7,}$/;
+        if (!bookingUrl1 || !bookingUrl2 || !name || !email || !phone || !phoneRegex.test(phone)) {
+            let missingFields = [];
+            if (!bookingUrl1) missingFields.push('bookingUrl1');
+            if (!bookingUrl2) missingFields.push('bookingUrl2');
+            if (!name) missingFields.push('name');
+            if (!email) missingFields.push('email');
+            if (!phone) missingFields.push('phone');
+            let message = `Missing or invalid required fields: ${missingFields.join(', ')}.`;
+            if (phone && !phoneRegex.test(phone)) {
+                message += ' Phone format invalid (Expected: +1 123...).';
+            }
+
+            logCapture(`ERROR: Missing/Invalid required fields for predictive booking. Provided: ${JSON.stringify(req.body)}`);
+            return res.status(400).json({
+                success: false,
+                message: message,
+                logs: logs
+            });
+        }
+
+        // Extract the base URL from the first booking URL
+        // This assumes booking URLs are in the format: https://calendly.com/username/30min/YYYY-MM-DDTHH:mm:ss
+        const baseUrlMatch = bookingUrl1.match(/(https:\/\/calendly\.com\/[^\/]+\/[^\/]+)\//);
+        const baseUrl = baseUrlMatch ? baseUrlMatch[1] : null;
+        
+        if (!baseUrl) {
+            logCapture(`ERROR: Could not extract base URL from booking URL: ${bookingUrl1}`);
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid booking URL format. Could not extract base URL.',
+                logs: logs
+            });
+        }
+
+        // Call the new specialized startPredictiveSession method (to be implemented in sessionManager.js)
+        logCapture(`Starting predictive session with two options...`);
+        logCapture(`Base URL: ${baseUrl}`);
+        logCapture(`Option 1: ${bookingUrl1}`);
+        logCapture(`Option 2: ${bookingUrl2}`);
+        logCapture(`Client: ${name}, ${email}, ${phone}`);
+
+        // This will be implemented in the sessionManager.js
+        const { startPredictiveSession } = require('./sessionManager');
+        const result = await startPredictiveSession(baseUrl, bookingUrl1, bookingUrl2, { name, email, phone }, logCapture);
+
+        if (result.success) {
+             logCapture(`Predictive session started successfully. Session IDs: ${result.sessionId1}, ${result.sessionId2}`);
+             res.json({
+                 success: true,
+                 sessionId1: result.sessionId1,
+                 sessionId2: result.sessionId2,
+                 message: 'Successfully prepared both meeting options.',
+                 logs: logs
+             });
+        } else {
+             logCapture(`Failed to start predictive session. Error: ${result.error}`);
+             res.status(500).json({
+                 success: false,
+                 message: `Failed to start predictive session: ${result.error || 'Unknown error'}`,
+                 logs: logs
+             });
+        }
+    } catch (error) {
+        const errorMessage = `Unexpected server error during predictive session start: ${error.message || error}`;
+        logCapture(`FATAL ERROR in /api/start-predictive-session: ${errorMessage}`);
+        console.error('Error in /api/start-predictive-session endpoint:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'An unexpected server error occurred during predictive session start.', 
+            logs: logs 
+        });
+    }
+});
+
+// --- Endpoint for Completing a Predictive Booking by Selecting an Option ---
+app.post('/api/complete-predictive-booking', async (req, res) => {
+    console.log(`Received /api/complete-predictive-booking request`);
+    const logs = [];
+    const logCapture = (message) => {
+        console.log(message);
+        logs.push(message);
+    };
+
+    try {
+        const { sessionId, selectedOption } = req.body;
+
+        // Validate inputs
+        if (!sessionId || (selectedOption !== 1 && selectedOption !== 2)) {
+            const errorMsg = `Missing or invalid parameters. Required: sessionId and selectedOption (1 or 2).`;
+            logCapture(`ERROR: ${errorMsg}`);
+            return res.status(400).json({
+                success: false,
+                message: errorMsg,
+                logs: logs
+            });
+        }
+
+        // Get the session
+        const session = activeSessions[sessionId];
+        if (!session) {
+            const errorMsg = `Session ${sessionId} not found or has expired.`;
+            logCapture(`ERROR: ${errorMsg}`);
+            return res.status(404).json({
+                success: false,
+                message: errorMsg,
+                logs: logs
+            });
+        }
+
+        // Check if this is part of a predictive session
+        if (!session.masterSessionId) {
+            const errorMsg = `Session ${sessionId} is not part of a predictive booking session.`;
+            logCapture(`ERROR: ${errorMsg}`);
+            return res.status(400).json({
+                success: false,
+                message: errorMsg,
+                logs: logs
+            });
+        }
+
+        // Check if the form is ready
+        if (!session.formReady) {
+            const errorMsg = `Form in session ${sessionId} is not ready for submission.`;
+            logCapture(`ERROR: ${errorMsg}`);
+            return res.status(400).json({
+                success: false,
+                message: errorMsg,
+                logs: logs
+            });
+        }
+
+        logCapture(`Completing predictive booking for session ${sessionId} (Option ${selectedOption})...`);
+        
+        // Import the new function for form submission
+        const { completeBooking } = require('./services/completePredictiveBooking');
+        
+        // Submit the form that's already filled out
+        const result = await completeBooking(session.page, logCapture);
+        
+        if (result.success) {
+            logCapture(`Successfully completed booking in ${result.submissionTime.toFixed(2)}s.`);
+            
+            // Return the successful result
+            res.json({
+                success: true,
+                message: `Successfully booked appointment for option ${selectedOption}.`,
+                selectedOption,
+                duration: result.submissionTime,
+                weakConfirmation: result.weakConfirmation || false,
+                logs: logs
+            });
+        } else {
+            logCapture(`Failed to complete booking: ${result.error}`);
+            
+            // Return the error result
+            res.status(500).json({
+                success: false,
+                message: `Failed to complete booking: ${result.error}`,
+                selectedOption,
+                duration: result.submissionTime,
+                logs: logs
+            });
+        }
+
+    } catch (error) {
+        const errorMessage = `Unexpected server error during predictive booking completion: ${error.message || error}`;
+        logCapture(`FATAL ERROR in /api/complete-predictive-booking: ${errorMessage}`);
+        console.error('Error in /api/complete-predictive-booking endpoint:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'An unexpected server error occurred during predictive booking completion.', 
+            logs: logs 
+        });
+    }
+});
+
 // Start the server directly
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

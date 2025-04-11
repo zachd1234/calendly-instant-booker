@@ -196,8 +196,9 @@
             <h1>Calendly Auto Booker</h1>
             <nav>
                 <ul>
-                    <li><a href="#direct-booker" id="nav-direct-booker" class="active">Direct Booker</a></li>
-                    <li><a href="#date-time-picker" id="nav-date-time-picker">Date-Time Picker</a></li>
+                    <li><a href="#direct-booking" id="nav-direct-booking" class="active">Direct Booking</a></li>
+                    <li><a href="#calendar-navigation" id="nav-calendar-navigation">Calendar Navigation Booking</a></li>
+                    <li><a href="#predictive-booking" id="nav-predictive-booking">Predictive Booking</a></li>
                 </ul>
             </nav>
         </div>
@@ -205,8 +206,8 @@
 
     <div class="container">
         <!-- Page Content Area -->
-        <div id="direct-booker-page" class="page-content active">
-            <h2>Direct Booker</h2>
+        <div id="direct-booking-page" class="page-content active">
+            <h2>Direct Booking</h2>
             <p>The Direct Booker uses a pre-warmed browser pool, with each browser session tied to a dedicated ISP proxy. These proxies are hosted in datacenters but registered under residential ISPs — combining the speed of datacenter IPs with the undetectability of residential ones.<br><br>The workflow has two steps. First, when Julian begins a call, the system assigns a dedicated IP and navigates to the customer's general Calendly page. This preloads assets and reduces perceived latency later in the process.<br><br>Then, when the user provides a fully-qualified Calendly booking URL (including a specific date and time), the system performs a direct page.goto() to that URL and fills out the form using a pre-scripted form filler.<br><br>This approach avoids complex DOM interactions on the calendar page — such as timezone shifts, hidden dates, and unreliable selectors — by skipping straight to the booking form. However, since it relies on a full navigation step, it can take up to 30 seconds during high-latency periods (but averages around 12).</p>
 
             <!-- Existing Content Goes Here -->
@@ -286,96 +287,171 @@
                     </div>
                 </div>
             </div>
-        </div> <!-- End of direct-booker-page -->
+        </div> <!-- End of direct-booking-page -->
 
-        <div id="date-time-picker-page" class="page-content">
-            <h2>Date-Time Picker</h2>
-            <p>The Date-Time Picker uses a pre-warmed browser pool, with each browser session tied to a dedicated ISP proxy. <br><br>The workflow consists of two steps. First, when Julian begins a call, the system assigns a dedicated IP and preloads the customer's general Calendly page in a background browser session. The browser stays idle on this page, warming assets and preparing for instant interaction.<br><br>When it's time to book, instead of navigating directly to a booking URL, the system behaves like a human — interacting with the page, clicking on the correct date, selecting a time slot, and then quickly filling out the form. Because the page and all calendar-related assets are already cached, this approach allows for sub-3-second booking times in many cases.<br><br>The main challenge with this method is handling dynamic calendar interfaces — including DOM inconsistencies, timezone shifts based on proxy location, and edge cases where the desired time slot isn't visible or rendered.</p>
-            <!-- DTP: Step 1 - Start Session -->
-            <div id="dtp-start-section">
-                <div id="dtp-start-error" class="preload-error"></div>
-                <form id="dtp-start-form">
+        <div id="calendar-navigation-page" class="page-content">
+            <h2>Calendar Navigation Booking</h2>
+            <p>The Calendar Navigation Booker uses a pre-warmed browser pool, with each browser session tied to a dedicated ISP proxy. <br><br>The workflow consists of two steps. First, when Julian begins a call, the system assigns a dedicated IP and preloads the customer's general Calendly page in a background browser session. The browser stays idle on this page, warming assets and preparing for instant interaction.<br><br>When it's time to book, instead of navigating directly to a booking URL, the system behaves like a human — interacting with the page, clicking on the correct date, selecting a time slot, and then quickly filling out the form. Because the page and all calendar-related assets are already cached, this approach allows for sub-3-second booking times in many cases.<br><br>The main challenge with this method is handling dynamic calendar interfaces — including DOM inconsistencies, timezone shifts based on proxy location, and edge cases where the desired time slot isn't visible or rendered.</p>
+            <!-- Calendar Navigation: Step 1 - Start Session (renamed from dtp-*) -->
+            <div id="cn-start-section">
+                <div id="cn-start-error" class="preload-error"></div>
+                <form id="cn-start-form">
                     <div class="form-group">
-                        <label for="dtp-calendly-url">What Page Will Julian Book On?</label>
-                        <input type="url" id="dtp-calendly-url" name="baseUrl" required
+                        <label for="cn-calendly-url">What Page Will Julian Book On?</label>
+                        <input type="url" id="cn-calendly-url" name="baseUrl" required
                                placeholder="e.g., https://calendly.com/username/30min">
                     </div>
-                    <button type="submit" id="dtp-start-btn">Preload Session</button>
+                    <button type="submit" id="cn-start-btn">Preload Session</button>
                 </form>
-                <div class="preload-loading" id="dtp-start-loading">
+                <div class="preload-loading" id="cn-start-loading">
                     <div class="spinner"></div>
                     <p>Initializing session and preloading Calendly page...
                         A warm browser and IP are being set up behind the scenes. Est. Time: 20 seconds.</p>
                 </div>
-                <div class="logs" id="dtp-start-logs" style="display: none; margin-top: 20px;">
-                     <!-- DTP Start Logs will be inserted here -->
+                <div class="logs" id="cn-start-logs" style="display: none; margin-top: 20px;">
+                     <!-- Calendar Navigation Start Logs will be inserted here -->
                 </div>
             </div>
 
-            <!-- DTP: Step 2 - Display Available Slots -->
-            <!-- <div id="dtp-slots-section" style="display: none;">
-                <h3>Available Slots</h3>
-            </div> -->
-
-            <!-- DTP: Step 3 - Booking Form (Copied Structure) -->
-            <div id="dtp-booking-section" style="display: none;">
+            <!-- Calendar Navigation: Step 2 - Booking Form (renamed from dtp-*) -->
+            <div id="cn-booking-section" style="display: none;">
                 <p>Now, provide the specific date/time URL. The system will interact with the page like a human — navigating the calendar DOM, selecting the correct date and time, and then quickly filling out the form.</p>
 
-               <div id="dtp-booking-error" class="error"></div>
+               <div id="cn-booking-error" class="error"></div>
 
-               <form id="dtp-booking-form">
+               <form id="cn-booking-form">
                    <div class="form-group">
-                       <label for="dtp-calendly-url-final">Specific Calendly Booking URL:</label>
-                       <input type="url" id="dtp-calendly-url-final" name="fullBookingUrl" required
+                       <label for="cn-calendly-url-final">Specific Calendly Booking URL:</label>
+                       <input type="url" id="cn-calendly-url-final" name="fullBookingUrl" required
                               placeholder="https://calendly.com/username/30min/YYYY-MM-DDTHH:mm:ss...">
                    </div>
 
                    <div class="form-group">
-                       <label for="dtp-name">Name:</label>
-                       <input type="text" id="dtp-name" name="name" required placeholder="John Doe">
+                       <label for="cn-name">Name:</label>
+                       <input type="text" id="cn-name" name="name" required placeholder="John Doe">
                    </div>
 
                    <div class="form-group">
-                       <label for="dtp-email">Email:</label>
-                       <input type="email" id="dtp-email" name="email" required placeholder="john@example.com">
+                       <label for="cn-email">Email:</label>
+                       <input type="email" id="cn-email" name="email" required placeholder="john@example.com">
                    </div>
 
                    <div class="form-group" style="display: flex; gap: 10px;">
                        <div style="flex: 0 0 80px;">
-                           <label for="dtp-phone-country-code">Code</label>
-                           <input type="text" id="dtp-phone-country-code" name="phoneCountryCode" required placeholder="+1" style="text-align: center;">
+                           <label for="cn-phone-country-code">Code</label>
+                           <input type="text" id="cn-phone-country-code" name="phoneCountryCode" required placeholder="+1" style="text-align: center;">
                        </div>
                        <div style="flex: 1;">
-                           <label for="dtp-phone-number">Phone Number</label>
-                           <input type="tel" id="dtp-phone-number" name="phoneNumber" required placeholder="3109122380 (no spaces/dashes)">
+                           <label for="cn-phone-number">Phone Number</label>
+                           <input type="tel" id="cn-phone-number" name="phoneNumber" required placeholder="3109122380 (no spaces/dashes)">
                        </div>
                    </div>
 
-                   <button type="submit" id="dtp-submit-btn"> Book Appointment (DOM)</button>
+                   <button type="submit" id="cn-submit-btn">Book Appointment (DOM Navigation)</button>
                </form>
 
-               <div class="loading" id="dtp-booking-loading">
+               <div class="loading" id="cn-booking-loading">
                    <div class="spinner"></div>
-                   <p>Booking appointment via DOM... This may take a minute longer than expected because Render instance needs to spin up.</p>
+                   <p>Booking appointment via DOM navigation... This may take a minute longer than expected because Render instance needs to spin up.</p>
                </div>
 
-               <div class="results" id="dtp-booking-results" style="display: none;">
-                   <h2>Booking Results (DOM)</h2>
+               <div class="results" id="cn-booking-results" style="display: none;">
+                   <h2>Booking Results (DOM Navigation)</h2>
 
-                   <div class="metrics" id="dtp-booking-metrics">
-                       <!-- DTP Metrics will be inserted here -->
+                   <div class="metrics" id="cn-booking-metrics">
+                       <!-- Calendar Navigation Metrics will be inserted here -->
                    </div>
 
-                   <h3>Booking Logs (DOM):</h3>
-                   <div class="logs" id="dtp-booking-logs">
-                       <!-- DTP Logs will be inserted here -->
+                   <h3>Booking Logs (DOM Navigation):</h3>
+                   <div class="logs" id="cn-booking-logs">
+                       <!-- Calendar Navigation Logs will be inserted here -->
                    </div>
                </div>
            </div>
+        </div> <!-- End of calendar-navigation-page -->
 
-            <!-- Removed original placeholder comment -->
-        </div> <!-- End of date-time-picker-page -->
+        <div id="predictive-booking-page" class="page-content">
+            <h2>Predictive Booking</h2>
+            <p>The Predictive Booking system allows Julian to suggest two potential meeting times to clients. It prepares browsers for both options so that when the client chooses one, the booking can be completed instantly.<br><br>Simply provide two specific Calendly booking URLs (with dates/times), and Julian will offer these choices to the client. When the client selects one, the system will immediately book that slot.</p>
 
+            <!-- Predictive Booking: Step 1 - Collect booking information -->
+            <div id="pb-start-section">
+                <div id="pb-start-error" class="preload-error"></div>
+                <form id="pb-start-form">
+                    <div class="form-group">
+                        <label for="pb-calendly-url1">First Potential Meeting Time (Exact URL):</label>
+                        <input type="url" id="pb-calendly-url1" name="bookingUrl1" required
+                               placeholder="e.g., https://calendly.com/username/30min/2023-06-01T14:00:00...">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="pb-calendly-url2">Second Potential Meeting Time (Exact URL):</label>
+                        <input type="url" id="pb-calendly-url2" name="bookingUrl2" required
+                               placeholder="e.g., https://calendly.com/username/30min/2023-06-02T15:00:00...">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="pb-name">Client Name:</label>
+                        <input type="text" id="pb-name" name="name" required placeholder="John Doe">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="pb-email">Client Email:</label>
+                        <input type="email" id="pb-email" name="email" required placeholder="john@example.com">
+                    </div>
+
+                    <div class="form-group" style="display: flex; gap: 10px;">
+                        <div style="flex: 0 0 80px;">
+                            <label for="pb-phone-country-code">Code</label>
+                            <input type="text" id="pb-phone-country-code" name="phoneCountryCode" required placeholder="+1" style="text-align: center;">
+                        </div>
+                        <div style="flex: 1;">
+                            <label for="pb-phone-number">Phone Number</label>
+                            <input type="tel" id="pb-phone-number" name="phoneNumber" required placeholder="3109122380 (no spaces/dashes)">
+                        </div>
+                    </div>
+
+                    <button type="submit" id="pb-start-btn">Prepare Both Meeting Options</button>
+                </form>
+                <div class="preload-loading" id="pb-start-loading">
+                    <div class="spinner"></div>
+                    <p>Preparing both meeting options with dedicated browsers...
+                        This process will take approximately 40 seconds.</p>
+                </div>
+                <div class="logs" id="pb-start-logs" style="display: none; margin-top: 20px;">
+                     <!-- PB Start Logs will be inserted here -->
+                </div>
+            </div>
+
+            <!-- Predictive Booking: Step 2 - Julian's suggestion -->
+            <div id="pb-suggestion-section" style="display: none;">
+                <h3>Julian's Meeting Suggestion</h3>
+                <div class="suggestion-box" style="background-color: #f0f7fb; padding: 20px; border-radius: 8px; border-left: 4px solid #3498db; margin-bottom: 20px;">
+                    <p style="font-size: 18px; margin-bottom: 15px;">Julian says: "How does <span id="time1-display">Thursday at 2:00 PM</span> or <span id="time2-display">Friday at 3:30 PM</span> sound for a meeting?"</p>
+                    
+                    <div style="display: flex; gap: 15px;">
+                        <button id="option1-btn" class="option-btn" style="flex: 1; padding: 12px; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer;">Select First Option</button>
+                        <button id="option2-btn" class="option-btn" style="flex: 1; padding: 12px; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer;">Select Second Option</button>
+                    </div>
+                </div>
+                
+                <div class="loading" id="pb-booking-loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>Booking the selected meeting time...</p>
+                </div>
+                
+                <div class="results" id="pb-booking-results" style="display: none;">
+                    <h2>Booking Results</h2>
+                    <div class="metrics" id="pb-booking-metrics">
+                        <!-- PB Metrics will be inserted here -->
+                    </div>
+                    <h3>Booking Logs:</h3>
+                    <div class="logs" id="pb-booking-logs">
+                        <!-- PB Logs will be inserted here -->
+                    </div>
+                </div>
+            </div>
+        </div> <!-- End of predictive-booking-page -->
     </div> <!-- End of container -->
 
     <script>
@@ -384,12 +460,14 @@
             let currentSessionId = null;
 
             // --- Page Navigation Elements ---
-            const navDirectBooker = document.getElementById('nav-direct-booker');
-            const navDateTimePicker = document.getElementById('nav-date-time-picker');
-            const directBookerPage = document.getElementById('direct-booker-page');
-            const dateTimePickerPage = document.getElementById('date-time-picker-page');
-            const navLinks = [navDirectBooker, navDateTimePicker];
-            const pageContents = [directBookerPage, dateTimePickerPage];
+            const navDirectBooking = document.getElementById('nav-direct-booking');
+            const navCalendarNavigation = document.getElementById('nav-calendar-navigation');
+            const navPredictiveBooking = document.getElementById('nav-predictive-booking');
+            const directBookingPage = document.getElementById('direct-booking-page');
+            const calendarNavigationPage = document.getElementById('calendar-navigation-page');
+            const predictiveBookingPage = document.getElementById('predictive-booking-page');
+            const navLinks = [navDirectBooking, navCalendarNavigation, navPredictiveBooking];
+            const pageContents = [directBookingPage, calendarNavigationPage, predictiveBookingPage];
 
             // --- Element References (Direct Booker Page) ---
             // Preload elements
@@ -411,24 +489,46 @@
             const logs = document.getElementById('logs'); // Booking logs
             const error = document.getElementById('error'); // Booking error
 
-            // --- Element References (Date-Time Picker Page) ---
-            const dtpStartSection = document.getElementById('dtp-start-section');
-            const dtpStartForm = document.getElementById('dtp-start-form');
-            const dtpUrlInput = document.getElementById('dtp-calendly-url');
-            const dtpStartBtn = document.getElementById('dtp-start-btn');
-            const dtpStartLoading = document.getElementById('dtp-start-loading');
-            const dtpStartError = document.getElementById('dtp-start-error');
-            const dtpStartLogs = document.getElementById('dtp-start-logs');
-            const dtpSlotsSection = document.getElementById('dtp-slots-section');
-            // --- Refs for DTP Booking Section ---
-            const dtpBookingSection = document.getElementById('dtp-booking-section');
-            const dtpBookingForm = document.getElementById('dtp-booking-form');
-            const dtpSubmitBtn = document.getElementById('dtp-submit-btn');
-            const dtpBookingLoading = document.getElementById('dtp-booking-loading');
-            const dtpBookingResults = document.getElementById('dtp-booking-results');
-            const dtpBookingMetrics = document.getElementById('dtp-booking-metrics');
-            const dtpBookingLogs = document.getElementById('dtp-booking-logs');
-            const dtpBookingError = document.getElementById('dtp-booking-error');
+            // --- Element References (Calendar Navigation Page) ---
+            const cnStartSection = document.getElementById('cn-start-section');
+            const cnStartForm = document.getElementById('cn-start-form');
+            const cnUrlInput = document.getElementById('cn-calendly-url');
+            const cnStartBtn = document.getElementById('cn-start-btn');
+            const cnStartLoading = document.getElementById('cn-start-loading');
+            const cnStartError = document.getElementById('cn-start-error');
+            const cnStartLogs = document.getElementById('cn-start-logs');
+            const cnBookingSection = document.getElementById('cn-booking-section');
+            const cnBookingForm = document.getElementById('cn-booking-form');
+            const cnSubmitBtn = document.getElementById('cn-submit-btn');
+            const cnBookingLoading = document.getElementById('cn-booking-loading');
+            const cnBookingResults = document.getElementById('cn-booking-results');
+            const cnBookingMetrics = document.getElementById('cn-booking-metrics');
+            const cnBookingLogs = document.getElementById('cn-booking-logs');
+            const cnBookingError = document.getElementById('cn-booking-error');
+
+            // --- Element References (Predictive Booking Page) ---
+            const pbStartSection = document.getElementById('pb-start-section');
+            const pbStartForm = document.getElementById('pb-start-form');
+            const pbUrlInput = document.getElementById('pb-calendly-url');
+            const pbStartBtn = document.getElementById('pb-start-btn');
+            const pbStartLoading = document.getElementById('pb-start-loading');
+            const pbStartError = document.getElementById('pb-start-error');
+            const pbStartLogs = document.getElementById('pb-start-logs');
+            const pbBookingSection = document.getElementById('pb-booking-section');
+            const pbBookingForm = document.getElementById('pb-booking-form');
+            const pbSubmitBtn = document.getElementById('pb-submit-btn');
+            const pbBookingLoading = document.getElementById('pb-booking-loading');
+            const pbBookingResults = document.getElementById('pb-booking-results');
+            const pbBookingMetrics = document.getElementById('pb-booking-metrics');
+            const pbBookingLogs = document.getElementById('pb-booking-logs');
+            const pbBookingError = document.getElementById('pb-booking-error');
+
+            // --- Add these new elements for the suggestion section ---
+            const pbSuggestionSection = document.getElementById('pb-suggestion-section');
+            const time1Display = document.getElementById('time1-display');
+            const time2Display = document.getElementById('time2-display');
+            const option1Btn = document.getElementById('option1-btn');
+            const option2Btn = document.getElementById('option2-btn');
 
             // --- Page Navigation Logic ---
             function showPage(pageToShow) {
@@ -438,27 +538,35 @@
                 navLinks.forEach(link => link.classList.remove('active'));
 
                 // Show the selected page and activate its link
-                if (pageToShow === directBookerPage) {
-                    directBookerPage.classList.add('active');
-                    navDirectBooker.classList.add('active');
-                } else if (pageToShow === dateTimePickerPage) {
-                    dateTimePickerPage.classList.add('active');
-                    navDateTimePicker.classList.add('active');
+                if (pageToShow === directBookingPage) {
+                    directBookingPage.classList.add('active');
+                    navDirectBooking.classList.add('active');
+                } else if (pageToShow === calendarNavigationPage) {
+                    calendarNavigationPage.classList.add('active');
+                    navCalendarNavigation.classList.add('active');
+                } else if (pageToShow === predictiveBookingPage) {
+                    predictiveBookingPage.classList.add('active');
+                    navPredictiveBooking.classList.add('active');
                 }
             }
 
-            navDirectBooker.addEventListener('click', (e) => {
+            navDirectBooking.addEventListener('click', (e) => {
                 e.preventDefault(); // Prevent hash jump
-                showPage(directBookerPage);
+                showPage(directBookingPage);
             });
 
-            navDateTimePicker.addEventListener('click', (e) => {
+            navCalendarNavigation.addEventListener('click', (e) => {
                 e.preventDefault(); // Prevent hash jump
-                showPage(dateTimePickerPage);
+                showPage(calendarNavigationPage);
+            });
+
+            navPredictiveBooking.addEventListener('click', (e) => {
+                e.preventDefault(); // Prevent hash jump
+                showPage(predictiveBookingPage);
             });
 
             // Initialize: Show the default page (Direct Booker)
-            showPage(directBookerPage);
+            showPage(directBookingPage);
 
             // --- Utility Function to Display Logs ---
             function displayLogs(logContainer, logMessages) {
@@ -646,24 +754,23 @@
                 }
             });
 
-            // --- DTP Start Session Form Submission Handler ---
-            dtpStartForm.addEventListener('submit', async function(e) {
+            // --- Calendar Navigation: Start Session Form Submission Handler ---
+            cnStartForm.addEventListener('submit', async function(e) {
                 e.preventDefault();
 
-                // Clear previous DTP start errors/logs
-                dtpStartError.style.display = 'none';
-                dtpStartError.textContent = '';
-                dtpStartLogs.style.display = 'none';
-                dtpStartLogs.innerHTML = '';
-                dtpBookingSection.style.display = 'none'; // Ensure DTP booking section is hidden initially
-                dtpBookingResults.style.display = 'none'; // Hide DTP results initially
-                // Hide booking section later if needed
+                // Clear previous start errors/logs
+                cnStartError.style.display = 'none';
+                cnStartError.textContent = '';
+                cnStartLogs.style.display = 'none';
+                cnStartLogs.innerHTML = '';
+                cnBookingSection.style.display = 'none'; // Ensure booking section is hidden initially
+                cnBookingResults.style.display = 'none'; // Hide results initially
 
                 // Disable button and show loading
-                dtpStartBtn.disabled = true;
-                dtpStartLoading.style.display = 'block';
+                cnStartBtn.disabled = true;
+                cnStartLoading.style.display = 'block';
 
-                const baseUrl = dtpUrlInput.value.trim();
+                const baseUrl = cnUrlInput.value.trim();
                 currentSessionId = null; // Reset session ID before starting a new one
 
                 try {
@@ -676,63 +783,63 @@
 
                     const data = await response.json();
 
-                    // Display DTP start logs
-                    displayLogs(dtpStartLogs, data.logs);
+                    // Display start logs
+                    displayLogs(cnStartLogs, data.logs);
 
                     if (response.ok && data.success) {
                         currentSessionId = data.sessionId; // Store the session ID
-                        console.log(`DTP Session started: ${currentSessionId}`);
+                        console.log(`Calendar Navigation Session started: ${currentSessionId}`);
 
-                        // Hide start section, show slots section
-                        dtpStartSection.style.display = 'none';
-                        dtpBookingSection.style.display = 'block';
+                        // Hide start section, show booking section
+                        cnStartSection.style.display = 'none';
+                        cnBookingSection.style.display = 'block';
 
-                        // Clear any previous DTP booking errors/results when showing the section
-                        dtpBookingError.style.display = 'none';
-                        dtpBookingResults.style.display = 'none';
+                        // Clear any previous booking errors/results when showing the section
+                        cnBookingError.style.display = 'none';
+                        cnBookingResults.style.display = 'none';
 
                     } else {
-                        // Show error in the DTP start section
-                        dtpStartError.textContent = data.message || 'Failed to start DTP session.';
-                        dtpStartError.style.display = 'block';
+                        // Show error in the start section
+                        cnStartError.textContent = data.message || 'Failed to start Calendar Navigation session.';
+                        cnStartError.style.display = 'block';
                     }
 
                 } catch (err) {
-                    console.error('DTP Start Error:', err);
-                    dtpStartError.textContent = 'Failed to connect to the server for DTP session start. Please try again.';
-                    dtpStartError.style.display = 'block';
-                    displayLogs(dtpStartLogs, [`CLIENT-SIDE ERROR: ${err.message || err}`]);
+                    console.error('Calendar Navigation Start Error:', err);
+                    cnStartError.textContent = 'Failed to connect to the server for Calendar Navigation session start. Please try again.';
+                    cnStartError.style.display = 'block';
+                    displayLogs(cnStartLogs, [`CLIENT-SIDE ERROR: ${err.message || err}`]);
                 } finally {
                     // Hide loading and re-enable button
-                    dtpStartLoading.style.display = 'none';
-                    dtpStartBtn.disabled = false;
+                    cnStartLoading.style.display = 'none';
+                    cnStartBtn.disabled = false;
                 }
             });
 
-            // --- DTP Booking Form Submission Handler ---
-            dtpBookingForm.addEventListener('submit', async function(e) {
+            // --- Calendar Navigation: Booking Form Submission Handler ---
+            cnBookingForm.addEventListener('submit', async function(e) {
                 e.preventDefault();
 
                 if (!currentSessionId) {
-                     dtpBookingError.textContent = 'Error: No active DTP session found. Please start a session first on this tab.';
-                     dtpBookingError.style.display = 'block';
+                     cnBookingError.textContent = 'Error: No active Calendar Navigation session found. Please start a session first on this tab.';
+                     cnBookingError.style.display = 'block';
                      return;
                 }
 
-                // Clear previous DTP booking results/errors
-                dtpBookingError.style.display = 'none';
-                dtpBookingError.textContent = '';
-                dtpBookingResults.style.display = 'none';
-                dtpBookingMetrics.innerHTML = '';
-                dtpBookingLogs.innerHTML = ''; // Clear DTP booking logs
+                // Clear previous booking results/errors
+                cnBookingError.style.display = 'none';
+                cnBookingError.textContent = '';
+                cnBookingResults.style.display = 'none';
+                cnBookingMetrics.innerHTML = '';
+                cnBookingLogs.innerHTML = ''; // Clear booking logs
 
                 // Disable submit button and show loading
-                dtpSubmitBtn.disabled = true;
-                dtpBookingLoading.style.display = 'block';
+                cnSubmitBtn.disabled = true;
+                cnBookingLoading.style.display = 'block';
 
-                // Get DTP form data
-                let countryCode = document.getElementById('dtp-phone-country-code').value.trim();
-                const number = document.getElementById('dtp-phone-number').value.trim().replace(/\s+/g, '');
+                // Get form data
+                let countryCode = document.getElementById('cn-phone-country-code').value.trim();
+                const number = document.getElementById('cn-phone-number').value.trim().replace(/\s+/g, '');
 
                 // Ensure country code starts with +
                 if (countryCode && !countryCode.startsWith('+')) {
@@ -743,25 +850,25 @@
 
                 const formData = {
                     sessionId: currentSessionId,
-                    fullBookingUrl: document.getElementById('dtp-calendly-url-final').value.trim(),
-                    name: document.getElementById('dtp-name').value.trim(),
-                    email: document.getElementById('dtp-email').value.trim(),
+                    fullBookingUrl: document.getElementById('cn-calendly-url-final').value.trim(),
+                    name: document.getElementById('cn-name').value.trim(),
+                    email: document.getElementById('cn-email').value.trim(),
                     phone: combinedPhone // Use the combined phone string
                 };
 
                 // Validate combinedPhone format
                 const phoneRegex = /^\+\d{1,4}\s\d{7,}$/;
                 if (!phoneRegex.test(combinedPhone)) {
-                    dtpBookingError.textContent = 'Invalid phone format. Please use format like "+1 1234567890".';
-                    dtpBookingError.style.display = 'block';
-                    dtpBookingLoading.style.display = 'none';
-                    dtpSubmitBtn.disabled = false;
+                    cnBookingError.textContent = 'Invalid phone format. Please use format like "+1 1234567890".';
+                    cnBookingError.style.display = 'block';
+                    cnBookingLoading.style.display = 'none';
+                    cnSubmitBtn.disabled = false;
                     return; // Stop submission
                 }
 
                 try {
-                    // Make API request to the NEW DOM booking endpoint
-                    const response = await fetch('/api/book-session-dom', { // <--- NEW ENDPOINT
+                    // Make API request to the DOM booking endpoint (same as before)
+                    const response = await fetch('/api/book-session-dom', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -771,12 +878,12 @@
 
                     const data = await response.json();
 
-                     // Display DTP booking logs
-                     displayLogs(dtpBookingLogs, data.logs);
+                     // Display booking logs
+                     displayLogs(cnBookingLogs, data.logs);
 
                     if (response.ok && data.success) {
-                        // Display metrics in DTP metrics area
-                        dtpBookingMetrics.innerHTML = `
+                        // Display metrics
+                        cnBookingMetrics.innerHTML = `
                             <div class="metric">
                                 <div class="metric-label">Total Time</div>
                                 <div class="metric-value">${data.duration}s</div>
@@ -791,29 +898,283 @@
                             </div>
                         `;
 
-                        // Show DTP results section
-                        dtpBookingResults.style.display = 'block';
+                        // Show results section
+                        cnBookingResults.style.display = 'block';
                     } else {
-                        // Show error in the DTP booking section
-                        dtpBookingError.textContent = data.message || 'An error occurred while booking the appointment (DOM).';
-                        dtpBookingError.style.display = 'block';
+                        // Show error
+                        cnBookingError.textContent = data.message || 'An error occurred while booking the appointment (DOM Navigation).';
+                        cnBookingError.style.display = 'block';
                         // Ensure results container is visible if logs exist
                         if (data.logs && data.logs.length) {
-                            dtpBookingResults.style.display = 'block';
+                            cnBookingResults.style.display = 'block';
                         }
                     }
                 } catch (err) {
-                    console.error('DTP Booking Error:', err);
-                    dtpBookingError.textContent = 'Failed to connect to the server for DTP booking. Please try again.';
-                    dtpBookingError.style.display = 'block';
-                    displayLogs(dtpBookingLogs, [`CLIENT-SIDE ERROR: ${err.message || err}`]);
-                    dtpBookingResults.style.display = 'block'; // Keep results visible to show logs
+                    console.error('Calendar Navigation Booking Error:', err);
+                    cnBookingError.textContent = 'Failed to connect to the server for Calendar Navigation booking. Please try again.';
+                    cnBookingError.style.display = 'block';
+                    displayLogs(cnBookingLogs, [`CLIENT-SIDE ERROR: ${err.message || err}`]);
+                    cnBookingResults.style.display = 'block'; // Keep results visible to show logs
                 } finally {
-                    // Hide DTP loading and re-enable DTP submit button
-                    dtpBookingLoading.style.display = 'none';
-                    dtpSubmitBtn.disabled = false;
+                    // Hide loading and re-enable submit button
+                    cnBookingLoading.style.display = 'none';
+                    cnSubmitBtn.disabled = false;
                 }
             });
+
+            // --- Predictive Booking: Start Form Handler ---
+            pbStartForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                
+                // Clear previous errors/logs
+                pbStartError.style.display = 'none';
+                pbStartError.textContent = '';
+                pbStartLogs.style.display = 'none';
+                pbStartLogs.innerHTML = '';
+                pbSuggestionSection.style.display = 'none';
+                
+                // Disable button and show loading
+                pbStartBtn.disabled = true;
+                pbStartLoading.style.display = 'block';
+                
+                // Get form data
+                const url1 = document.getElementById('pb-calendly-url1').value.trim();
+                const url2 = document.getElementById('pb-calendly-url2').value.trim();
+                let countryCode = document.getElementById('pb-phone-country-code').value.trim();
+                const number = document.getElementById('pb-phone-number').value.trim().replace(/\s+/g, '');
+                
+                // Ensure country code starts with +
+                if (countryCode && !countryCode.startsWith('+')) {
+                    countryCode = '+' + countryCode;
+                }
+                
+                const combinedPhone = `${countryCode} ${number}`;
+                
+                // Validate phone format
+                const phoneRegex = /^\+\d{1,4}\s\d{7,}$/;
+                if (!phoneRegex.test(combinedPhone)) {
+                    pbStartError.textContent = 'Invalid phone format. Please use format like "+1 1234567890".';
+                    pbStartError.style.display = 'block';
+                    pbStartLoading.style.display = 'none';
+                    pbStartBtn.disabled = false;
+                    return; // Stop submission
+                }
+                
+                // Prepare data for API call
+                const formData = {
+                    bookingUrl1: url1,
+                    bookingUrl2: url2,
+                    name: document.getElementById('pb-name').value.trim(),
+                    email: document.getElementById('pb-email').value.trim(),
+                    phone: combinedPhone
+                };
+                
+                try {
+                    // Call new API endpoint for predictive booking
+                    const response = await fetch('/api/start-predictive-session', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(formData)
+                    });
+                    
+                    const data = await response.json();
+                    
+                    // Display logs
+                    displayLogs(pbStartLogs, data.logs);
+                    
+                    if (response.ok && data.success) {
+                        // Store session IDs for later use
+                        currentPredictiveSession = {
+                            sessionId1: data.sessionId1,
+                            sessionId2: data.sessionId2,
+                            bookingUrl1: url1,
+                            bookingUrl2: url2,
+                            clientInfo: {
+                                name: formData.name,
+                                email: formData.email,
+                                phone: formData.phone
+                            }
+                        };
+                        
+                        // Parse and display the two time options in a human-readable format
+                        try {
+                            // Extract datetime from the URL and format it nicely for display
+                            // This is a basic implementation - you may need to adjust based on your actual URL format
+                            const extractAndFormatTime = (url) => {
+                                // Try to extract the datetime parameter from the URL
+                                const dateMatch = url.match(/\/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/);
+                                if (dateMatch && dateMatch[1]) {
+                                    const dateObj = new Date(dateMatch[1]);
+                                    // Format: "Thursday, June 1 at 2:00 PM"
+                                    return dateObj.toLocaleDateString('en-US', {
+                                        weekday: 'long',
+                                        month: 'long',
+                                        day: 'numeric'
+                                    }) + ' at ' + 
+                                    dateObj.toLocaleTimeString('en-US', {
+                                        hour: 'numeric',
+                                        minute: '2-digit',
+                                        hour12: true
+                                    });
+                                }
+                                return "the specified time"; // Fallback
+                            };
+                            
+                            time1Display.textContent = extractAndFormatTime(url1);
+                            time2Display.textContent = extractAndFormatTime(url2);
+                        } catch (parseError) {
+                            console.error('Error parsing datetime:', parseError);
+                            time1Display.textContent = "the first option";
+                            time2Display.textContent = "the second option";
+                        }
+                        
+                        // Hide start section, show suggestion section
+                        pbStartSection.style.display = 'none';
+                        pbSuggestionSection.style.display = 'block';
+                        
+                    } else {
+                        // Show error
+                        pbStartError.textContent = data.message || 'Failed to start predictive booking session.';
+                        pbStartError.style.display = 'block';
+                    }
+                } catch (err) {
+                    console.error('Predictive Booking Error:', err);
+                    pbStartError.textContent = 'Failed to connect to the server. Please try again.';
+                    pbStartError.style.display = 'block';
+                    displayLogs(pbStartLogs, [`CLIENT-SIDE ERROR: ${err.message || err}`]);
+                } finally {
+                    // Hide loading and re-enable button
+                    pbStartLoading.style.display = 'none';
+                    pbStartBtn.disabled = false;
+                }
+            });
+
+            // Store predictive session data
+            let currentPredictiveSession = null;
+
+            // --- Predictive Booking: Option Selection Handlers ---
+            option1Btn.addEventListener('click', function() {
+                if (currentPredictiveSession) {
+                    // Book the first option
+                    bookSelectedOption(1);
+                }
+            });
+
+            option2Btn.addEventListener('click', function() {
+                if (currentPredictiveSession) {
+                    // Book the second option
+                    bookSelectedOption(2);
+                }
+            });
+
+            async function bookSelectedOption(optionNumber) {
+                if (!currentPredictiveSession) {
+                    return;
+                }
+                
+                // Disable both option buttons
+                option1Btn.disabled = true;
+                option2Btn.disabled = true;
+                
+                // Show loading
+                pbBookingLoading.style.display = 'block';
+                pbBookingResults.style.display = 'none';
+                
+                // Determine which session ID to use
+                const sessionId = optionNumber === 1 ? 
+                    currentPredictiveSession.sessionId1 : 
+                    currentPredictiveSession.sessionId2;
+                
+                const bookingUrl = optionNumber === 1 ? 
+                    currentPredictiveSession.bookingUrl1 : 
+                    currentPredictiveSession.bookingUrl2;
+                
+                try {
+                    // Make actual API call to complete the booking
+                    const response = await fetch('/api/complete-predictive-booking', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            sessionId: sessionId,
+                            selectedOption: optionNumber
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        // Display actual metrics from response
+                        pbBookingMetrics.innerHTML = `
+                            <div class="metric">
+                                <div class="metric-label">Total Time</div>
+                                <div class="metric-value">${result.duration?.toFixed(1) || '0.0'}s</div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-label">Selection</div>
+                                <div class="metric-value">Option ${optionNumber}</div>
+                            </div>
+                        `;
+                        
+                        // Display actual logs from response
+                        let logsHtml = '';
+                        if (result.logs && result.logs.length > 0) {
+                            logsHtml = result.logs.map(log => `<div>${log}</div>`).join('');
+                        } else {
+                            logsHtml = `
+                                <div>Using pre-warmed session ${sessionId}...</div>
+                                <div>Selected Option ${optionNumber}: ${bookingUrl}</div>
+                                <div>Submitting form with client info...</div>
+                                <div>Name: ${currentPredictiveSession.clientInfo.name}</div>
+                                <div>Email: ${currentPredictiveSession.clientInfo.email}</div>
+                                <div>Phone: ${currentPredictiveSession.clientInfo.phone}</div>
+                                <div>Successfully booked appointment!</div>
+                            `;
+                        }
+                        pbBookingLogs.innerHTML = logsHtml;
+                    } else {
+                        // Display error message
+                        pbBookingMetrics.innerHTML = `
+                            <div class="metric">
+                                <div class="metric-label">Status</div>
+                                <div class="metric-value error">Failed</div>
+                            </div>
+                        `;
+                        
+                        // Display error logs
+                        let errorLogsHtml = '';
+                        if (result.logs && result.logs.length > 0) {
+                            errorLogsHtml = result.logs.map(log => `<div>${log}</div>`).join('');
+                        } else {
+                            errorLogsHtml = `
+                                <div>Error: ${result.message || 'Unknown error occurred'}</div>
+                            `;
+                        }
+                        pbBookingLogs.innerHTML = errorLogsHtml;
+                    }
+                } catch (error) {
+                    // Handle fetch errors
+                    console.error('Error completing predictive booking:', error);
+                    pbBookingMetrics.innerHTML = `
+                        <div class="metric">
+                            <div class="metric-label">Status</div>
+                            <div class="metric-value error">Error</div>
+                        </div>
+                    `;
+                    pbBookingLogs.innerHTML = `<div>Error: Failed to complete booking. ${error.message}</div>`;
+                } finally {
+                    // Show results
+                    pbBookingLoading.style.display = 'none';
+                    pbBookingResults.style.display = 'block';
+                    
+                    // Re-enable buttons
+                    option1Btn.disabled = false;
+                    option2Btn.disabled = false;
+                }
+            }
         });
     </script>
 </body>

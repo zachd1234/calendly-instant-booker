@@ -20,5 +20,5 @@ module.exports = {
   BLOCK_IMAGES: process.env.BLOCK_IMAGES !== 'false', // Block images by default
   BLOCK_FONTS: process.env.BLOCK_FONTS !== 'false', // Block fonts by default
   BLOCK_ANALYTICS: process.env.BLOCK_ANALYTICS !== 'false', // Block analytics by default
-  HEADLESS: process.env.HEADLESS !== 'true', // Run in headless mode by default
+  HEADLESS: process.env.HEADLESS !== 'false', // Run in headless mode by default
 }; 

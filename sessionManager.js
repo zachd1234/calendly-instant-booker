@@ -36,7 +36,7 @@ async function humanDelay(page, min = 500, max = 2000) {
 }
 
 /**
- * Performs human-like mouse movements on the page
+ * Performs more sophisticated human-like mouse movements with idle periods
  * @param {Page} page - Playwright page
  * @param {string} sessionId - Session identifier for logging
  * @param {Function} logCapture - Logging function
@@ -46,43 +46,121 @@ async function simulateHumanMouseMovement(page, sessionId, logCapture) {
     let lastX = 100 + Math.floor(Math.random() * 500);
     let lastY = 100 + Math.floor(Math.random() * 300);
     
-    // Number of movements (fewer for better performance)
-    const movements = 3 + Math.floor(Math.random() * 5);
+    // More complex movement patterns
+    const patterns = [
+        'casual-browsing',     // Slow movements with pauses
+        'reading-content',     // Small movements + scrolling
+        'searching-for-info',  // Faster movements, clicks
+        'idle-thinking'        // Almost no movement + long pause
+    ];
     
+    const selectedPattern = patterns[Math.floor(Math.random() * patterns.length)];
+    logCapture(`[${sessionId}] Using human behavior pattern: ${selectedPattern}`);
+    
+    // Number of movements based on pattern
+    let movements = 3;
+    let idleProbability = 0.1;
+    let scrollProbability = 0.3;
+    let maxIdleTime = 2000;
+    
+    // Adjust parameters based on selected pattern
+    switch(selectedPattern) {
+        case 'casual-browsing':
+            movements = 3 + Math.floor(Math.random() * 4);
+            scrollProbability = 0.4;
+            idleProbability = 0.2;
+            maxIdleTime = 3000;
+            break;
+        case 'reading-content':
+            movements = 2 + Math.floor(Math.random() * 3);
+            scrollProbability = 0.7;
+            idleProbability = 0.3;
+            maxIdleTime = 5000;
+            break;
+        case 'searching-for-info':
+            movements = 5 + Math.floor(Math.random() * 4);
+            scrollProbability = 0.5;
+            idleProbability = 0.1;
+            maxIdleTime = 1500;
+            break;
+        case 'idle-thinking':
+            movements = 1 + Math.floor(Math.random() * 2);
+            scrollProbability = 0.2;
+            idleProbability = 0.8;
+            maxIdleTime = 8000;
+            break;
+    }
+    
+    // Perform movements with idle periods
     for (let i = 0; i < movements; i++) {
-        // Generate next position with natural movement
-        const nextX = Math.max(0, Math.min(1200, lastX + (Math.random() - 0.5) * 300));
-        const nextY = Math.max(0, Math.min(700, lastY + (Math.random() - 0.5) * 200));
+        // Simulate idle period
+        if (Math.random() < idleProbability) {
+            const idleTime = Math.floor(Math.random() * maxIdleTime) + 500;
+            logCapture(`[${sessionId}] Idle period: ${idleTime}ms`);
+            await page.waitForTimeout(idleTime);
+        }
         
-        // Fewer steps for better performance
-        const steps = 5 + Math.floor(Math.random() * 10);
+        // Generate next position with more natural movement
+        // Using bezier curves for more realistic movement
+        const targetX = Math.max(0, Math.min(1200, lastX + (Math.random() - 0.5) * 400));
+        const targetY = Math.max(0, Math.min(700, lastY + (Math.random() - 0.5) * 250));
         
-        // Perform movement with intermediate points
-        for (let step = 1; step <= steps; step++) {
-            // Ease-in-out curve for natural movement
+        const controlPointX1 = lastX + (targetX - lastX) * (0.2 + Math.random() * 0.3);
+        const controlPointY1 = lastY + (targetY - lastY) * (0.2 + Math.random() * 0.3);
+        const controlPointX2 = lastX + (targetX - lastX) * (0.6 + Math.random() * 0.3);
+        const controlPointY2 = lastY + (targetY - lastY) * (0.6 + Math.random() * 0.3);
+        
+        // Fewer steps for better performance but still realistic
+        const steps = 5 + Math.floor(Math.random() * 15);
+        
+        // Perform movement with bezier curve
+        for (let step = 0; step <= steps; step++) {
             const t = step / steps;
-            const tSmoothstep = t * t * (3 - 2 * t);
             
-            const x = lastX + (nextX - lastX) * tSmoothstep;
-            const y = lastY + (nextY - lastY) * tSmoothstep;
+            // Cubic bezier curve calculation
+            const tPow2 = t * t;
+            const tPow3 = tPow2 * t;
+            const mt = 1 - t;
+            const mtPow2 = mt * mt;
+            const mtPow3 = mtPow2 * mt;
+            
+            const x = mtPow3 * lastX + 
+                     3 * mtPow2 * t * controlPointX1 + 
+                     3 * mt * tPow2 * controlPointX2 + 
+                     tPow3 * targetX;
+                     
+            const y = mtPow3 * lastY + 
+                     3 * mtPow2 * t * controlPointY1 + 
+                     3 * mt * tPow2 * controlPointY2 + 
+                     tPow3 * targetY;
             
             await page.mouse.move(x, y);
-            await page.waitForTimeout(5 + Math.random() * 10); // Small delay
+            
+            // Variable delay between movements
+            const stepDelay = 5 + Math.random() * (t < 0.3 || t > 0.7 ? 15 : 8);
+            await page.waitForTimeout(stepDelay);
         }
         
         // Update last position
-        lastX = nextX;
-        lastY = nextY;
+        lastX = targetX;
+        lastY = targetY;
         
-        // Add a short pause between movements
-        await humanDelay(page, 50, 200);
+        // Random chance to click after movement
+        if (Math.random() < 0.3) {
+            await page.mouse.click(lastX, lastY);
+            await humanDelay(page, 300, 800);
+        }
+        
+        // Random chance to scroll after movement
+        if (Math.random() < scrollProbability) {
+            const scrollAmount = Math.floor(Math.random() * 300) + 50;
+            const scrollDirection = Math.random() > 0.2 ? 1 : -1; // 80% down, 20% up
+            await page.mouse.wheel(0, scrollAmount * scrollDirection);
+            await humanDelay(page, 300, 1000);
+        }
     }
     
-    // Add some scrolling
-    const scrollAmount = Math.floor(Math.random() * 300) + 100;
-    await page.mouse.wheel(0, scrollAmount);
-    
-    logCapture(`[${sessionId}] Completed ${movements} human-like mouse movements`);
+    logCapture(`[${sessionId}] Completed ${movements} human-like mouse movements with pattern: ${selectedPattern}`);
 }
 
 /**
@@ -169,7 +247,7 @@ async function startSession(baseUrl, logCapture = console.log, retryCount = 0) {
         
         // Launch with combined arguments
         browser = await chromium.launch({
-            headless: true,
+            headless: false,
             proxy: proxySettings,
             args: [...baseArgs, ...selectedOptionalArgs]
         });
@@ -196,7 +274,7 @@ async function startSession(baseUrl, logCapture = console.log, retryCount = 0) {
             isMobile: false,
             javaScriptEnabled: true,
             acceptDownloads: false,
-            extraHTTPHeaders: {
+            extraHTTPers: {
                 'Accept-Language': 'en-US,en;q=0.9',
                 'X-Forwarded-For': '128.97.27.37', // UCLA IP
                 'Sec-Ch-Ua': '"Google Chrome";v="124", " Not;A Brand";v="99"',
@@ -580,7 +658,12 @@ async function closeSession(sessionId) {
     if (!session) return false;
     
     try {
-        const { page, browser, logCapture = console.log } = session;
+        const { page, browser, logCapture = console.log, rateLimitCheckInterval } = session;
+        
+        // Clear any intervals
+        if (rateLimitCheckInterval) {
+            clearInterval(rateLimitCheckInterval);
+        }
         
         // First remove route handlers
         if (page && !page.isClosed()) {
@@ -680,4 +763,441 @@ function startIdleSessionCleanup() {
             }
         }
     }
+}
+
+/**
+ * Starts a predictive session with two separate browser instances for two potential meeting times
+ * @param {string} baseUrl - The base Calendly URL (not used in this implementation)
+ * @param {string} bookingUrl1 - First specific booking URL with date/time
+ * @param {string} bookingUrl2 - Second specific booking URL with date/time
+ * @param {Object} clientInfo - Client information for booking
+ * @param {string} clientInfo.name - Client name
+ * @param {string} clientInfo.email - Client email
+ * @param {string} clientInfo.phone - Client phone in format "+1 1234567890"
+ * @param {Function} logCapture - Function to capture logs
+ * @returns {Promise<Object>} Success/failure status and session IDs
+ */
+async function startPredictiveSession(baseUrl, bookingUrl1, bookingUrl2, clientInfo, logCapture = console.log) {
+    const masterSessionId = crypto.randomUUID();
+    const startTime = Date.now();
+    logCapture(`[${masterSessionId}] Starting predictive session with two options...`);
+    
+    try {
+        // Import the new predictive booking service
+        const { prepareBooking } = require('./services/predictiveBookingService');
+        
+        // Start two separate browser sessions going directly to the specific booking URLs
+        logCapture(`[${masterSessionId}] Launching first browser directly to booking URL 1...`);
+        const session1Promise = startSession(bookingUrl1, 
+            (msg) => logCapture(`[Option1] ${msg}`));
+            
+        logCapture(`[${masterSessionId}] Launching second browser directly to booking URL 2...`);
+        const session2Promise = startSession(bookingUrl2, 
+            (msg) => logCapture(`[Option2] ${msg}`));
+        
+        // Wait for both sessions to initialize
+        const [session1Result, session2Result] = await Promise.all([session1Promise, session2Promise]);
+        
+        // Check if both sessions started successfully
+        if (!session1Result.success || !session2Result.success) {
+            const errorMessage = !session1Result.success 
+                ? `First session failed: ${session1Result.error}` 
+                : `Second session failed: ${session2Result.error}`;
+                
+            throw new Error(errorMessage);
+        }
+        
+        const sessionId1 = session1Result.sessionId;
+        const sessionId2 = session2Result.sessionId;
+        
+        // Store client information in both sessions
+        if (activeSessions[sessionId1]) {
+            activeSessions[sessionId1].clientInfo = { ...clientInfo };
+            activeSessions[sessionId1].bookingUrl = bookingUrl1;
+        }
+        
+        if (activeSessions[sessionId2]) {
+            activeSessions[sessionId2].clientInfo = { ...clientInfo };
+            activeSessions[sessionId2].bookingUrl = bookingUrl2;
+        }
+        
+        // Link the two sessions together under the master session
+        activeSessions[sessionId1].masterSessionId = masterSessionId;
+        activeSessions[sessionId2].masterSessionId = masterSessionId;
+        
+        // Now prepare both booking forms using the new service
+        logCapture(`[${masterSessionId}] Preparing booking form for option 1...`);
+        const prepareOption1 = prepareBooking(
+            activeSessions[sessionId1].page,
+            bookingUrl1,
+            clientInfo.name,
+            clientInfo.email,
+            clientInfo.phone,
+            (msg) => logCapture(`[Option1] ${msg}`)
+        );
+        
+        logCapture(`[${masterSessionId}] Preparing booking form for option 2...`);
+        const prepareOption2 = prepareBooking(
+            activeSessions[sessionId2].page,
+            bookingUrl2,
+            clientInfo.name,
+            clientInfo.email,
+            clientInfo.phone,
+            (msg) => logCapture(`[Option2] ${msg}`)
+        );
+        
+        // Wait for both preparations to complete
+        const [prepResult1, prepResult2] = await Promise.all([prepareOption1, prepareOption2]);
+        
+        // Check preparation results
+        if (!prepResult1.success || !prepResult2.success) {
+            const errorMessage = !prepResult1.success 
+                ? `Preparation of form 1 failed: ${prepResult1.error}` 
+                : `Preparation of form 2 failed: ${prepResult2.error}`;
+                
+            logCapture(`[${masterSessionId}] ⚠️ Warning: ${errorMessage}`);
+            // We won't throw here, as we still have the sessions even if form filling failed
+        }
+        
+        // Update session data with preparation results
+        if (activeSessions[sessionId1]) {
+            activeSessions[sessionId1].prepResult = prepResult1;
+            activeSessions[sessionId1].formReady = prepResult1.success;
+        }
+        
+        if (activeSessions[sessionId2]) {
+            activeSessions[sessionId2].prepResult = prepResult2;
+            activeSessions[sessionId2].formReady = prepResult2.success;
+        }
+        
+        const totalTime = (Date.now() - startTime) / 1000;
+        logCapture(`[${masterSessionId}] Predictive session initialized successfully in ${totalTime.toFixed(2)}s`);
+        logCapture(`[${masterSessionId}] Session 1 ID: ${sessionId1}, Form Ready: ${prepResult1.success}`);
+        logCapture(`[${masterSessionId}] Session 2 ID: ${sessionId2}, Form Ready: ${prepResult2.success}`);
+        
+        return {
+            success: true,
+            sessionId1,
+            sessionId2,
+            masterSessionId,
+            option1Ready: prepResult1.success,
+            option2Ready: prepResult2.success,
+            duration: parseFloat(totalTime.toFixed(2))
+        };
+        
+    } catch (error) {
+        logCapture(`[${masterSessionId}] ❌ ERROR during predictive session start: ${error.message || error}`);
+        
+        const totalTime = (Date.now() - startTime) / 1000;
+        return {
+            success: false,
+            error: error.message || 'Unknown error',
+            duration: parseFloat(totalTime.toFixed(2))
+        };
+    }
+}
+
+// Make sure to export this new function
+module.exports = {
+    startSession,
+    startPredictiveSession,
+    activeSessions
+};
+
+/**
+ * Sets realistic geo-aware HTTP headers
+ * @param {Page} page - Playwright page
+ * @param {Object} ipInfo - IP information object
+ * @param {string} sessionId - Session identifier for logging
+ * @param {Function} logCapture - Logging function
+ */
+async function setGeoConsistentHeaders(page, ipInfo, sessionId, logCapture) {
+    // Base user agents for different platforms
+    const userAgents = {
+        windows: [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0'
+        ],
+        mac: [
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:123.0) Gecko/20100101 Firefox/123.0'
+        ],
+        linux: [
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:123.0) Gecko/20100101 Firefox/123.0'
+        ]
+    };
+    
+    // Language mapping by country
+    const languageByCountry = {
+        'US': 'en-US',
+        'GB': 'en-GB',
+        'CA': 'en-CA,fr-CA',
+        'AU': 'en-AU',
+        'DE': 'de-DE',
+        'FR': 'fr-FR',
+        'IT': 'it-IT',
+        'ES': 'es-ES',
+        'JP': 'ja-JP',
+        'default': 'en-US'
+    };
+    
+    // Time zone mapping by region (simplified)
+    const timezoneByRegion = {
+        'US': [
+            'America/New_York',
+            'America/Chicago',
+            'America/Denver',
+            'America/Los_Angeles'
+        ],
+        'GB': ['Europe/London'],
+        'CA': ['America/Toronto', 'America/Vancouver'],
+        'AU': ['Australia/Sydney', 'Australia/Perth'],
+        'DE': ['Europe/Berlin'],
+        'FR': ['Europe/Paris'],
+        'IT': ['Europe/Rome'],
+        'ES': ['Europe/Madrid'],
+        'JP': ['Asia/Tokyo'],
+        'default': ['America/New_York']
+    };
+    
+    // Define platform distribution by region
+    const platformDistribution = {
+        'US': { windows: 0.65, mac: 0.3, linux: 0.05 },
+        'GB': { windows: 0.7, mac: 0.25, linux: 0.05 },
+        'CA': { windows: 0.65, mac: 0.3, linux: 0.05 },
+        'default': { windows: 0.75, mac: 0.2, linux: 0.05 }
+    };
+    
+    // Determine geo settings from IP info
+    const country = ipInfo?.country || 'US';
+    
+    // Select platform based on country distribution
+    const distribution = platformDistribution[country] || platformDistribution.default;
+    const random = Math.random();
+    let platform;
+    
+    if (random < distribution.windows) {
+        platform = 'windows';
+    } else if (random < distribution.windows + distribution.mac) {
+        platform = 'mac';
+    } else {
+        platform = 'linux';
+    }
+    
+    // Select consistent user-agent, language, and timezone
+    const userAgent = userAgents[platform][Math.floor(Math.random() * userAgents[platform].length)];
+    const language = languageByCountry[country] || languageByCountry.default;
+    const timezones = timezoneByRegion[country] || timezoneByRegion.default;
+    const timezone = timezones[Math.floor(Math.random() * timezones.length)];
+    
+    // Common accept headers
+    const acceptHeaders = {
+        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'accept-encoding': 'gzip, deflate, br',
+        'accept-language': language + ',en;q=0.9',
+        'cache-control': 'max-age=0',
+        'sec-ch-ua': '"Google Chrome";v="124", " Not;A Brand";v="99"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': platform === 'windows' ? '"Windows"' : platform === 'mac' ? '"macOS"' : '"Linux"',
+        'sec-fetch-dest': 'document',
+        'sec-fetch-mode': 'navigate', 
+        'sec-fetch-site': 'none',
+        'sec-fetch-user': '?1',
+        'upgrade-insecure-requests': '1'
+    };
+    
+    // Set viewport consistent with platform
+    let viewportWidth, viewportHeight;
+    if (platform === 'windows') {
+        viewportWidth = 1280 + Math.floor(Math.random() * 200) - 100;
+        viewportHeight = 800 + Math.floor(Math.random() * 100) - 50;
+    } else if (platform === 'mac') {
+        viewportWidth = 1440 + Math.floor(Math.random() * 150) - 75;
+        viewportHeight = 900 + Math.floor(Math.random() * 100) - 50;
+    } else {
+        viewportWidth = 1366 + Math.floor(Math.random() * 100) - 50;
+        viewportHeight = 768 + Math.floor(Math.random() * 100) - 50;
+    }
+    
+    // Set the headers
+    await page.setExtraHTTPHeaders(acceptHeaders);
+    
+    // Set viewport and timezone
+    await page.setViewportSize({ width: viewportWidth, height: viewportHeight });
+    
+    // Log the settings
+    logCapture(`[${sessionId}] Set geo-consistent headers for ${country}`);
+    logCapture(`[${sessionId}] - Platform: ${platform}`);
+    logCapture(`[${sessionId}] - User-Agent: ${userAgent}`);
+    logCapture(`[${sessionId}] - Language: ${language}`);
+    logCapture(`[${sessionId}] - Timezone: ${timezone}`);
+    logCapture(`[${sessionId}] - Viewport: ${viewportWidth}x${viewportHeight}`);
+    
+    // Apply timezone and feature settings via script
+    await page.addInitScript(({ timezone, userAgent, platform }) => {
+        // Override timezone
+        const timezoneOverride = timezone;
+        if (Intl.DateTimeFormat) {
+            const originalDateTimeFormat = Intl.DateTimeFormat;
+            Intl.DateTimeFormat = function(...args) {
+                if (args.length > 0 && args[1] && args[1].timeZone) {
+                    args[1].timeZone = timezoneOverride;
+                }
+                return new originalDateTimeFormat(...args);
+            };
+            Intl.DateTimeFormat.prototype = originalDateTimeFormat.prototype;
+        }
+        
+        // Override user agent
+        if (navigator) {
+            try {
+                Object.defineProperty(navigator, 'userAgent', { get: () => userAgent });
+                
+                // Platform-specific overrides
+                if (platform === 'windows') {
+                    Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+                    Object.defineProperty(navigator, 'appVersion', { get: () => userAgent.substring(8) });
+                } else if (platform === 'mac') {
+                    Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' });
+                    Object.defineProperty(navigator, 'appVersion', { get: () => userAgent.substring(8) });
+                } else {
+                    Object.defineProperty(navigator, 'platform', { get: () => 'Linux x86_64' });
+                    Object.defineProperty(navigator, 'appVersion', { get: () => userAgent.substring(8) });
+                }
+            } catch (e) {
+                console.error('Failed to override navigator properties:', e);
+            }
+        }
+    }, { timezone, userAgent, platform });
+    
+    return { 
+        userAgent, 
+        language, 
+        timezone, 
+        platform, 
+        viewport: { width: viewportWidth, height: viewportHeight } 
+    };
+}
+
+/**
+ * Checks if page is being rate limited and rotates proxy if needed
+ * @param {Page} page - Playwright page
+ * @param {string} sessionId - Session identifier
+ * @param {Function} logCapture - Logging function
+ * @returns {Promise<boolean>} True if rate limiting was detected and handled
+ */
+async function detectAndHandleRateLimiting(page, sessionId, logCapture) {
+    try {
+        // Check for common rate limiting signals
+        const rateLimitIndicators = [
+            // Text content indicators
+            'rate limit',
+            'too many requests',
+            'try again later',
+            'temporarily blocked',
+            'unusual activity',
+            'captcha',
+            
+            // HTTP status indicators
+            '429',
+            '403'
+        ];
+        
+        // Check page content
+        const content = await page.content();
+        const lowerContent = content.toLowerCase();
+        
+        // Check for indicators in content
+        const hasRateLimitIndicator = rateLimitIndicators.some(indicator => 
+            lowerContent.includes(indicator.toLowerCase()));
+            
+        // Check for status code
+        const status = await page.evaluate(() => {
+            try {
+                // Try to get last response status from performance entries
+                const entries = performance.getEntriesByType('resource');
+                const lastEntry = entries[entries.length - 1];
+                if (lastEntry && lastEntry.responseStatus) {
+                    return lastEntry.responseStatus;
+                }
+                return null;
+            } catch (e) {
+                return null;
+            }
+        });
+        
+        if (hasRateLimitIndicator || status === 429 || status === 403) {
+            logCapture(`[${sessionId}] ⚠️ Rate limiting detected! Status: ${status || 'unknown'}`);
+            
+            // Update session with rate limit info
+            if (activeSessions[sessionId]) {
+                activeSessions[sessionId].rateLimitDetected = true;
+                activeSessions[sessionId].rateLimitTime = Date.now();
+            }
+            
+            // Now we need to rotate the proxy by restarting the session
+            logCapture(`[${sessionId}] Attempting to rotate proxy and restart session...`);
+            
+            // Keep track of current URL and client info
+            const currentUrl = page.url();
+            const sessionInfo = activeSessions[sessionId] || {};
+            
+            // Close current session
+            await closeSession(sessionId);
+            
+            // Wait a bit before retrying
+            await new Promise(resolve => setTimeout(resolve, 3000 + Math.random() * 5000));
+            
+            // Start a new session with the same URL
+            logCapture(`[${sessionId}] Creating fresh session with new proxy...`);
+            const result = await startSession(currentUrl, logCapture);
+            
+            if (result.success) {
+                logCapture(`[${sessionId}] Successfully rotated proxy! New session ID: ${result.sessionId}`);
+                
+                // Transfer any client information to new session if needed
+                if (sessionInfo.clientInfo && activeSessions[result.sessionId]) {
+                    activeSessions[result.sessionId].clientInfo = sessionInfo.clientInfo;
+                    activeSessions[result.sessionId].previousSessionId = sessionId;
+                }
+                
+                return true;
+            } else {
+                logCapture(`[${sessionId}] ❌ Failed to rotate proxy: ${result.error}`);
+                return false;
+            }
+        }
+        
+        return false;
+    } catch (error) {
+        logCapture(`[${sessionId}] Error checking for rate limiting: ${error.message}`);
+        return false;
+    }
+}
+
+// Start a rate limiting detection interval
+const rateLimitCheckInterval = setInterval(async () => {
+    // Check if session is still valid
+    if (!activeSessions[sessionId] || !activeSessions[sessionId].page) {
+        clearInterval(rateLimitCheckInterval);
+        return;
+    }
+    
+    try {
+        const wasRateLimited = await detectAndHandleRateLimiting(page, sessionId, logCapture);
+        if (wasRateLimited) {
+            // If proxy was rotated, clear this interval
+            clearInterval(rateLimitCheckInterval);
+        }
+    } catch (e) {
+        // Ignore errors, will retry on next interval
+    }
+}, 15000); // Check every 15 seconds
+
+// Store the interval in the session for cleanup
+if (activeSessions[sessionId]) {
+    activeSessions[sessionId].rateLimitCheckInterval = rateLimitCheckInterval;
 }
