@@ -8,6 +8,7 @@ const { standardizeBrowserProfile, standardizeBrowserSession, removeAllRoutes } 
 // --- Configuration ---
 const SESSION_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;    // 5 minutes
+const MAX_IP_RETRIES = 3; // Max retries if specific problematic IP is detected
 // PROXY_LIST_PATH is no longer needed
 
 // --- State ---
@@ -86,11 +87,15 @@ async function simulateHumanMouseMovement(page, sessionId, logCapture) {
 
 /**
  * Enhanced start session function with advanced anti-bot measures
+ * @param {string} baseUrl The target URL to navigate to initially.
+ * @param {Function} [logCapture=console.log] Function to capture logs.
+ * @param {number} [retryCount=0] Internal counter for IP-based retries.
+ * @returns {Promise<object>} Object indicating success/failure, sessionId, and duration.
  */
-async function startSession(baseUrl, logCapture = console.log) {
+async function startSession(baseUrl, logCapture = console.log, retryCount = 0) {
     const sessionId = crypto.randomUUID();
     const sessionStartTime = Date.now();
-    logCapture(`[${sessionId}] Starting enhanced session with realistic browser behavior...`);
+    logCapture(`[${sessionId}] Starting enhanced session (Attempt ${retryCount + 1})...`);
 
     // --- Configure Rotating Proxy ---
     const ZD_USERNAME = process.env.ZD_PROXY_USERNAME;
@@ -358,6 +363,39 @@ async function startSession(baseUrl, logCapture = console.log) {
         }
 
         // Apply one-time standardization but with natural behavior
+        // --- IP Detection and Conditional Retry --- 
+        let ipInfo = null;
+        try {
+            logCapture(`[${sessionId}] Detecting IP information...`);
+            const response = await page.goto('https://ipinfo.io/json', { timeout: 10000 });
+            ipInfo = await response.json();
+            logCapture(`[${sessionId}] IP Information: ${JSON.stringify(ipInfo, null, 2)}`);
+
+            const problematicIP = '45.196.58.213';
+            if (ipInfo && ipInfo.ip === problematicIP) {
+                logCapture(`[${sessionId}] Detected problematic IP: ${problematicIP}`);
+                if (retryCount < MAX_IP_RETRIES) {
+                    logCapture(`[${sessionId}] Attempting retry (${retryCount + 1}/${MAX_IP_RETRIES})...`);
+                    // Clean up current attempt before retrying
+                    if (browser) await browser.close().catch(() => {});
+                    // Recursive call with incremented retry count
+                    return startSession(baseUrl, logCapture, retryCount + 1); 
+                } else {
+                    logCapture(`[${sessionId}] ❌ ERROR: Reached max retries (${MAX_IP_RETRIES}) for problematic IP ${problematicIP}. Failing session start.`);
+                    throw new Error(`Failed to get a non-problematic IP after ${MAX_IP_RETRIES} retries.`);
+                }
+            }
+        } catch (ipError) {
+            // Log non-critical IP detection errors, but check if it was the problematic IP error
+            if (ipError.message.includes('Failed to get a non-problematic IP')) {
+                throw ipError; // Re-throw the specific error to fail the session
+            }
+            logCapture(`[${sessionId}] WARN: IP detection failed or skipped (non-critical): ${ipError.message}`);
+            // Optionally, save state even without IP info if needed elsewhere
+            // await context.storageState({ path: `session_state_${sessionId}.json` }).catch(e => logCapture(`[${sessionId}] WARN: Saving state failed: ${e.message}`));
+        }
+        // --- End IP Detection --- 
+
         await standardizeBrowserSession(browser, page, sessionId, logCapture);
         await humanDelay(page, 500, 1500);
         

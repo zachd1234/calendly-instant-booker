@@ -6,64 +6,98 @@ const { activeSessions } = require('./sessionManager');
 const { devices } = require('playwright');
 // Import standardizeBrowserProfile from browserUtils
 const { standardizeBrowserProfile } = require('./utils/browserUtils');
+// Remove date-fns imports
+// const { format, getYear, getMonth, getDate, getHours, getMinutes, parseISO } = require('date-fns');
+// const dateFnsTz = require('date-fns-tz');
+// Import Luxon
+const { DateTime } = require('luxon');
 
 /**
- * Standardizes the browser profile to ensure consistent Calendly access
- * @param {Page} page - Playwright page object
- * @param {string} sessionId - Session ID for logging
- * @param {Function} logCapture - Logging function
+ * Parses a Calendly URL, extracts the date/time, converts it to Pacific Time using Luxon.
+ * @param {string} url - The full Calendly booking URL.
+ * @returns {object|null} An object with { year, month, day, timeString, timezone } or null on error.
  */
-// --- Helper: Parse Date/Time from Calendly URL ---
 function parseCalendlyUrl(url) {
+    const targetTimeZone = 'America/Los_Angeles'; // Always convert to Pacific Time
+
     try {
-        // Example: https://calendly.com/user/event/YYYY-MM-DDTHH:mm:ss-ZZ:ZZ
-        // Extract the date/time part with timezone: YYYY-MM-DDTHH:mm:ss-ZZ:ZZ
-        const dateTimeString = url.split('/').pop().split('?')[0]; // Get last part, remove query params
+        // --- Revised Date/Time String Extraction --- 
+        const urlObject = new URL(url);
+        const pathSegments = urlObject.pathname.split('/');
+        let dateTimeStringWithOffset = null;
+        // Regex to identify the ISO date-time string with offset
+        const isoDateTimeRegex = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}/;
         
-        // Extract the timezone offset from the URL
-        let timezoneOffset = "";
-        const timezoneMatch = dateTimeString.match(/([+-]\d{2}:\d{2})$/);
-        if (timezoneMatch) {
-            timezoneOffset = timezoneMatch[1];
-            console.log(`Detected timezone offset in URL: ${timezoneOffset}`);
-        } else {
-            console.log(`No timezone offset detected in URL, using local timezone`);
-        }
-        
-        // Create a date object that correctly interprets the timezone in the URL
-        const date = new Date(dateTimeString);
-
-        if (isNaN(date)) {
-            throw new Error('Invalid date format in URL');
+        // Search backwards through path segments
+        for (let i = pathSegments.length - 1; i >= 0; i--) {
+            if (isoDateTimeRegex.test(pathSegments[i])) {
+                dateTimeStringWithOffset = pathSegments[i];
+                break;
+            }
         }
 
-        // Extract date components directly from the date object
-        // (Date constructor already handles the timezone correctly)
-        const year = date.getFullYear();
-        const month = date.getMonth(); // 0-indexed (0 = Jan, 1 = Feb, ...)
-        const day = date.getDate();
-        let hours = date.getHours(); // 24-hour format
-        const minutes = date.getMinutes();
+        // Fallback: if not found in path segments, check the last part before query params
+        if (!dateTimeStringWithOffset) {
+             const lastSegment = url.split('/').pop().split('?')[0];
+             if (isoDateTimeRegex.test(lastSegment)) {
+                 dateTimeStringWithOffset = lastSegment;
+             } else {
+                // If still not found, throw an error
+                throw new Error('Could not find valid date/time string segment in URL path.');
+             }
+        }
+        // --- End of Revised Extraction ---
+        
+        console.log(`[parseCalendlyUrl] Extracted dateTimeString with offset: ${dateTimeStringWithOffset}`);
 
-        // Convert to am/pm format used in data-start-time
+        // Use Luxon to parse the ISO string, keeping the original zone info
+        const dtOriginal = DateTime.fromISO(dateTimeStringWithOffset, { setZone: true });
+        console.log(`[parseCalendlyUrl] Result of Luxon.fromISO: ${dtOriginal.toISO()}, Valid: ${dtOriginal.isValid}`);
+        if (!dtOriginal.isValid) {
+            console.error(`[parseCalendlyUrl] ERROR: Luxon returned Invalid DateTime for string: ${dateTimeStringWithOffset}. Reason: ${dtOriginal.invalidReason} - ${dtOriginal.invalidExplanation}`);
+            throw new Error(`Luxon returned Invalid DateTime for string: ${dateTimeStringWithOffset}`);
+        }
+        console.log(`[parseCalendlyUrl] Successfully parsed ISO string with Luxon.`);
+
+        // Convert to the target Pacific Time zone
+        const datePacific = dtOriginal.setZone(targetTimeZone);
+        console.log(`[parseCalendlyUrl] Result of Luxon.setZone('${targetTimeZone}'): ${datePacific.toISO()}, Valid: ${datePacific.isValid}`);
+        if (!datePacific.isValid) {
+            console.error(`[parseCalendlyUrl] ERROR: Luxon setZone resulted in Invalid DateTime. Original Input: ${dtOriginal.toISO()}, TimeZone: ${targetTimeZone}`);
+            throw new Error(`Luxon setZone resulted in Invalid DateTime.`);
+        }
+        console.log(`[parseCalendlyUrl] Successfully converted to Pacific Time with Luxon.`);
+
+        // Extract components based on Pacific Time using Luxon getters
+        const year = datePacific.year;
+        const month = datePacific.month - 1; // Adjust Luxon's 1-indexed month to 0-indexed for compatibility
+        const day = datePacific.day;
+        let hours = datePacific.hour; // 24-hour format in Pacific Time
+        const minutes = datePacific.minute;
+
+        // Format the timeString in am/pm format based on Pacific Time hours
+        // Luxon provides formatting options, but we'll stick to the manual format for consistency
         const ampm = hours >= 12 ? 'pm' : 'am';
-        hours = hours % 12;
-        hours = hours ? hours : 12; // the hour '0' should be '12'
-        const minutesStr = minutes < 10 ? '0' + minutes : minutes;
-        const timeString = `${hours}:${minutesStr}${ampm}`; // e.g., "9:00am", "2:30pm"
+        const displayHours = hours % 12 === 0 ? 12 : hours % 12; // Handle 12 AM/PM correctly
+        const minutesStr = minutes < 10 ? '0' + minutes : String(minutes);
+        const timeString = `${displayHours}:${minutesStr}${ampm}`; // e.g., "9:00am", "3:30pm"
 
-        // For logging, display both the original time and the local display time
-        const localTimeString = date.toLocaleTimeString();
-        
+        // For logging, show original and Pacific Time using Luxon formatting
+        const originalTimeString = dtOriginal.toFormat("yyyy-MM-dd hh:mm:ss a ZZZZ"); 
+        const pacificTimeString = datePacific.toFormat('yyyy-MM-dd hh:mm:ss a zzzz');
+
         console.log(`Parsed Calendly URL: ${url}`);
-        console.log(`Original datetime: ${dateTimeString} with offset ${timezoneOffset}`);
-        console.log(`Time for selection: ${timeString}`);
-        
-        // Include the timezone offset in the returned object for reference
-        return { year, month, day, timeString, timezoneOffset };
+        console.log(`Original DateTime w/ Offset: ${dateTimeStringWithOffset} (${originalTimeString})`);
+        // console.log(`Parsed as UTC Instant: ${dtOriginal.toUTC().toISO()}`); // Log UTC equivalent if needed
+        console.log(`Converted to Pacific Time: ${pacificTimeString}`);
+        console.log(`Time for selection (Pacific): ${timeString}`);
+
+        // Return components based on Pacific Time
+        return { year, month, day, timeString, timezone: targetTimeZone }; // Use 0-indexed month
     } catch (e) {
-        console.error(`Error parsing Calendly URL ${url}: ${e.message}`);
-        return null;
+        // Log the full error object, including stack trace
+        console.error(`[parseCalendlyUrl] ❌ Error parsing Calendly URL ${url}:`, e);
+        return null; // Still return null on error
     }
 }
 

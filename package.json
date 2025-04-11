@@ -15,9 +15,12 @@
   "description": "Web application for automating Calendly appointment bookings",
   "dependencies": {
     "axios": "^1.8.4",
+    "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0",
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
     "https-proxy-agent": "^7.0.6",
+    "luxon": "^3.6.1",
     "node-fetch": "^2.7.0",
     "playwright": "^1.51.1",
     "puppeteer-extra-plugin-adblocker": "^2.13.6"
